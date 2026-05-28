@@ -1,0 +1,85 @@
+[
+  {
+    "transaction_id": "TXN_TRAIN_001",
+    "user_id": "U001",
+    "service_type": "train_ticket",
+    "amount": 450000,
+    "status": "completed",
+    "order_id": "ORDER_TRAIN_001",
+    "provider_ref_id": "TRAIN_REF_001",
+    "created_at": "2026-05-27T10:05:00Z"
+  },
+  {
+    "transaction_id": "TXN_TRAIN_002",
+    "user_id": "U002",
+    "service_type": "train_ticket",
+    "amount": 350000,
+    "status": "completed",
+    "order_id": "ORDER_TRAIN_002",
+    "provider_ref_id": "TRAIN_REF_002",
+    "created_at": "2026-05-27T09:30:00Z"
+  },
+  {
+    "transaction_id": "TXN_TRAIN_003",
+    "user_id": "U002",
+    "service_type": "train_ticket",
+    "amount": 520000,
+    "status": "completed",
+    "order_id": "ORDER_TRAIN_003",
+    "provider_ref_id": "TRAIN_REF_003",
+    "created_at": "2026-05-27T08:00:00Z"
+  },
+  {
+    "transaction_id": "TXN_BILL_001",
+    "user_id": "U003",
+    "service_type": "electric_bill",
+    "amount": 720000,
+    "status": "completed",
+    "bill_code": "EVN123456",
+    "customer_code": "KH998877",
+    "provider_ref_id": "EVN_REF_001",
+    "created_at": "2026-05-27T11:00:00Z"
+  },
+  {
+    "transaction_id": "TXN_BILL_002",
+    "user_id": "U004",
+    "service_type": "electric_bill",
+    "amount": 480000,
+    "status": "completed",
+    "bill_code": "EVN789012",
+    "customer_code": "KH112233",
+    "provider_ref_id": "EVN_REF_002",
+    "created_at": "2026-05-27T12:00:00Z"
+  },
+  {
+    "transaction_id": "TXN_BILL_003",
+    "user_id": "U005",
+    "service_type": "water_bill",
+    "amount": 310000,
+    "status": "completed",
+    "bill_code": "WATER_001",
+    "customer_code": "KH556677",
+    "provider_ref_id": "WATER_REF_001",
+    "created_at": "2026-05-27T13:00:00Z"
+  },
+  {
+    "transaction_id": "TXN_CONFLICT_001",
+    "user_id": "U006",
+    "service_type": "train_ticket",
+    "amount": 400000,
+    "status": "pending",
+    "order_id": "ORDER_CONFLICT_001",
+    "provider_ref_id": "TRAIN_REF_CONFLICT_001",
+    "created_at": "2026-05-27T14:00:00Z"
+  },
+  {
+    "transaction_id": "TXN_REFUND_001",
+    "user_id": "U007",
+    "service_type": "train_ticket",
+    "amount": 450000,
+    "status": "completed",
+    "order_id": "ORDER_REFUND_001",
+    "provider_ref_id": "TRAIN_REF_REFUND_001",
+    "created_at": "2026-05-26T10:00:00Z"
+  }
+]

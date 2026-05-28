@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Use Case Diagram – AI Back-office Workflow Agent Fintech</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #f8f8f6;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 32px 16px;
+      min-height: 100vh;
+    }
+    h1 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #2c2c2a;
+      margin-bottom: 6px;
+      text-align: center;
+    }
+    p.subtitle {
+      font-size: 13px;
+      color: #73726c;
+      margin-bottom: 24px;
+      text-align: center;
+    }
+    .card {
+      background: #fff;
+      border-radius: 14px;
+      border: 1px solid #e0dfd7;
+      padding: 24px;
+      max-width: 760px;
+      width: 100%;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    }
+    svg { width: 100%; height: auto; display: block; }
+
+    /* Color ramps */
+    .c-purple rect, .c-purple ellipse { fill: #EEEDFE; stroke: #534AB7; }
+    .c-purple text { fill: #3C3489; }
+    .c-teal rect, .c-teal ellipse { fill: #E1F5EE; stroke: #0F6E56; }
+    .c-teal text { fill: #085041; }
+    .c-coral rect, .c-coral ellipse { fill: #FAECE7; stroke: #993C1D; }
+    .c-coral text { fill: #712B13; }
+    .c-amber rect, .c-amber ellipse { fill: #FAEEDA; stroke: #854F0B; }
+    .c-amber text { fill: #633806; }
+    .c-gray rect, .c-gray ellipse { fill: #F1EFE8; stroke: #5F5E5A; }
+    .c-gray text { fill: #444441; }
+
+    .node { cursor: pointer; }
+    .node:hover ellipse, .node:hover rect { opacity: 0.85; }
+
+    text.th { font-size: 14px; font-weight: 500; fill: #2c2c2a; }
+    text.ts { font-size: 12px; fill: #73726c; }
+
+    .arr { stroke: #b4b2a9; stroke-width: 1; fill: none; }
+    .leader { stroke: #b4b2a9; stroke-width: 0.5; stroke-dasharray: 3 3; }
+
+    @media print {
+      body { background: #fff; padding: 0; }
+      .card { box-shadow: none; border: none; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Sơ đồ Use Case – AI Back-office Workflow Agent</h1>
+  <p class="subtitle">AI Agent hỗ trợ xử lý khiếu nại, hoàn tiền và đối soát giao dịch trong hệ sinh thái Fintech</p>
+  <div class="card">
+    <svg viewBox="0 0 680 940" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </marker>
+      </defs>
+
+      <!-- System boundary -->
+      <rect x="160" y="20" width="480" height="860" rx="16" fill="none" stroke="#b4b2a9" stroke-width="1.5" stroke-dasharray="6 4"/>
+      <text class="th" x="400" y="48" text-anchor="middle" fill="#2c2c2a">AI Back-office Workflow Agent System</text>
+
+      <!-- ===== ACTORS ===== -->
+
+      <!-- Khách hàng -->
+      <circle cx="68" cy="130" r="16" fill="none" stroke="#73726c" stroke-width="1.5"/>
+      <line x1="68" y1="146" x2="68" y2="186" stroke="#73726c" stroke-width="1.5"/>
+      <line x1="44" y1="164" x2="92" y2="164" stroke="#73726c" stroke-width="1.5"/>
+      <line x1="68" y1="186" x2="48" y2="208" stroke="#73726c" stroke-width="1.5"/>
+      <line x1="68" y1="186" x2="88" y2="208" stroke="#73726c" stroke-width="1.5"/>
+      <text class="ts" x="68" y="224" text-anchor="middle">Khách hàng</text>
+
+      <!-- Nhân viên CS/Ops -->
+      <circle cx="68" cy="410" r="16" fill="none" stroke="#73726c" stroke-width="1.5"/>
+      <line x1="68" y1="426" x2="68" y2="466" stroke="#73726c" stroke-width="1.5"/>
+      <line x1="44" y1="444" x2="92" y2="444" stroke="#73726c" stroke-width="1.5"/>
+      <line x1="68" y1="466" x2="48" y2="488" stroke="#73726c" stroke-width="1.5"/>
+      <line x1="68" y1="466" x2="88" y2="488" stroke="#73726c" stroke-width="1.5"/>
+      <text class="ts" x="68" y="502" text-anchor="middle">Nhân viên</text>
+      <text class="ts" x="68" y="516" text-anchor="middle">CS / Ops</text>
+
+      <!-- Scheduler -->
+      <circle cx="68" cy="700" r="16" fill="none" stroke="#73726c" stroke-width="1.5"/>
+      <line x1="68" y1="716" x2="68" y2="756" stroke="#73726c" stroke-width="1.5"/>
+      <line x1="44" y1="734" x2="92" y2="734" stroke="#73726c" stroke-width="1.5"/>
+      <line x1="68" y1="756" x2="48" y2="778" stroke="#73726c" stroke-width="1.5"/>
+      <line x1="68" y1="756" x2="88" y2="778" stroke="#73726c" stroke-width="1.5"/>
+      <text class="ts" x="68" y="793" text-anchor="middle">Scheduler</text>
+
+      <!-- Provider / Bank -->
+      <circle cx="614" cy="500" r="16" fill="none" stroke="#73726c" stroke-width="1.5"/>
+      <line x1="614" y1="516" x2="614" y2="556" stroke="#73726c" stroke-width="1.5"/>
+      <line x1="590" y1="534" x2="638" y2="534" stroke="#73726c" stroke-width="1.5"/>
+      <line x1="614" y1="556" x2="594" y2="578" stroke="#73726c" stroke-width="1.5"/>
+      <line x1="614" y1="556" x2="634" y2="578" stroke="#73726c" stroke-width="1.5"/>
+      <text class="ts" x="614" y="594" text-anchor="middle">Provider /</text>
+      <text class="ts" x="614" y="608" text-anchor="middle">Bank</text>
+
+      <!-- ===== USE CASES ===== -->
+
+      <!-- UC1: Gửi khiếu nại -->
+      <g class="node c-purple">
+        <ellipse cx="340" cy="110" rx="130" ry="24" stroke-width="0.5"/>
+        <text class="th" x="340" y="114" text-anchor="middle" dominant-baseline="central">Gửi khiếu nại / ticket</text>
+      </g>
+
+      <!-- UC2: Trích xuất thông tin -->
+      <g class="node c-teal">
+        <ellipse cx="340" cy="195" rx="130" ry="24" stroke-width="0.5"/>
+        <text class="th" x="340" y="199" text-anchor="middle" dominant-baseline="central">Trích xuất thông tin</text>
+      </g>
+
+      <!-- UC3: Yêu cầu bổ sung -->
+      <g class="node c-teal">
+        <ellipse cx="340" cy="280" rx="130" ry="24" stroke-width="0.5"/>
+        <text class="th" x="340" y="284" text-anchor="middle" dominant-baseline="central">Yêu cầu bổ sung thông tin</text>
+      </g>
+
+      <!-- UC4: Lấy evidence -->
+      <g class="node c-teal">
+        <ellipse cx="340" cy="365" rx="130" ry="24" stroke-width="0.5"/>
+        <text class="th" x="340" y="369" text-anchor="middle" dominant-baseline="central">Lấy evidence từ hệ thống</text>
+      </g>
+
+      <!-- UC5: Phát hiện conflict -->
+      <g class="node c-coral">
+        <ellipse cx="340" cy="450" rx="130" ry="24" stroke-width="0.5"/>
+        <text class="th" x="340" y="454" text-anchor="middle" dominant-baseline="central">Phát hiện conflict dữ liệu</text>
+      </g>
+
+      <!-- UC6: Route workflow -->
+      <g class="node c-teal">
+        <ellipse cx="340" cy="535" rx="130" ry="24" stroke-width="0.5"/>
+        <text class="th" x="340" y="539" text-anchor="middle" dominant-baseline="central">Route workflow phù hợp</text>
+      </g>
+
+      <!-- UC7: Chẩn đoán & đề xuất -->
+      <g class="node c-teal">
+        <ellipse cx="340" cy="620" rx="130" ry="24" stroke-width="0.5"/>
+        <text class="th" x="340" y="624" text-anchor="middle" dominant-baseline="central">Chẩn đoán &amp; đề xuất action</text>
+      </g>
+
+      <!-- UC8: Phê duyệt -->
+      <g class="node c-amber">
+        <ellipse cx="340" cy="705" rx="130" ry="24" stroke-width="0.5"/>
+        <text class="th" x="340" y="709" text-anchor="middle" dominant-baseline="central">Phê duyệt / từ chối action</text>
+      </g>
+
+      <!-- UC9: Audit log -->
+      <g class="node c-gray">
+        <ellipse cx="340" cy="790" rx="130" ry="24" stroke-width="0.5"/>
+        <text class="th" x="340" y="794" text-anchor="middle" dominant-baseline="central">Ghi audit log</text>
+      </g>
+
+      <!-- UC10: SLA -->
+      <g class="node c-amber">
+        <ellipse cx="340" cy="860" rx="130" ry="24" stroke-width="0.5"/>
+        <text class="th" x="340" y="864" text-anchor="middle" dominant-baseline="central">Kiểm tra SLA / escalate</text>
+      </g>
+
+      <!-- ===== ACTOR → USE CASE LINES ===== -->
+      <line x1="84" y1="148" x2="205" y2="110" stroke="#b4b2a9" stroke-width="1" fill="none" marker-end="url(#arrow)"/>
+      <line x1="84" y1="160" x2="205" y2="266" stroke="#b4b2a9" stroke-width="1" fill="none" marker-end="url(#arrow)"/>
+      <line x1="84" y1="426" x2="205" y2="695" stroke="#b4b2a9" stroke-width="1" fill="none" marker-end="url(#arrow)"/>
+      <line x1="84" y1="438" x2="205" y2="612" stroke="#b4b2a9" stroke-width="1" fill="none" marker-end="url(#arrow)"/>
+      <line x1="84" y1="716" x2="205" y2="852" stroke="#b4b2a9" stroke-width="1" fill="none" marker-end="url(#arrow)"/>
+      <line x1="598" y1="516" x2="475" y2="376" stroke="#b4b2a9" stroke-width="1" fill="none" marker-end="url(#arrow)"/>
+
+      <!-- ===== FLOW ARROWS (vertical) ===== -->
+      <line x1="340" y1="134" x2="340" y2="171" stroke="#b4b2a9" stroke-width="1" marker-end="url(#arrow)"/>
+      <line x1="340" y1="219" x2="340" y2="256" stroke="#b4b2a9" stroke-width="1" marker-end="url(#arrow)"/>
+      <line x1="340" y1="304" x2="340" y2="341" stroke="#b4b2a9" stroke-width="1" marker-end="url(#arrow)"/>
+      <line x1="340" y1="389" x2="340" y2="426" stroke="#b4b2a9" stroke-width="1" marker-end="url(#arrow)"/>
+      <line x1="340" y1="474" x2="340" y2="511" stroke="#b4b2a9" stroke-width="1" marker-end="url(#arrow)"/>
+      <line x1="340" y1="559" x2="340" y2="596" stroke="#b4b2a9" stroke-width="1" marker-end="url(#arrow)"/>
+      <line x1="340" y1="644" x2="340" y2="681" stroke="#b4b2a9" stroke-width="1" marker-end="url(#arrow)"/>
+      <line x1="340" y1="729" x2="340" y2="766" stroke="#b4b2a9" stroke-width="1" marker-end="url(#arrow)"/>
+      <line x1="340" y1="814" x2="340" y2="836" stroke="#b4b2a9" stroke-width="1" marker-end="url(#arrow)"/>
+
+      <!-- Conflict → Manual Review bypass -->
+      <path d="M476 450 Q575 450 575 560 Q575 660 476 660" fill="none" stroke="#D85A30" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#arrow)"/>
+      <text class="ts" x="590" y="552" text-anchor="middle">manual</text>
+      <text class="ts" x="590" y="565" text-anchor="middle">review</text>
+
+      <!-- ===== LEGEND ===== -->
+      <line x1="175" y1="908" x2="505" y2="908" stroke="#e0dfd7" stroke-width="1"/>
+      <g transform="translate(182, 916)">
+        <ellipse cx="10" cy="7" rx="10" ry="7" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
+        <text class="ts" x="26" y="11">Input</text>
+        <ellipse cx="90" cy="7" rx="10" ry="7" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+        <text class="ts" x="106" y="11">Agent</text>
+        <ellipse cx="175" cy="7" rx="10" ry="7" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+        <text class="ts" x="191" y="11">Human</text>
+        <ellipse cx="268" cy="7" rx="10" ry="7" fill="#FAECE7" stroke="#993C1D" stroke-width="0.5"/>
+        <text class="ts" x="284" y="11">Conflict</text>
+        <ellipse cx="352" cy="7" rx="10" ry="7" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
+        <text class="ts" x="368" y="11">System</text>
+      </g>
+    </svg>
+  </div>
+  <p style="font-size:11px; color:#aaa; margin-top:16px; text-align:center;">
+    AI Back-office Workflow Agent v2.0 · 2026-05-27
+  </p>
+</body>
+</html>

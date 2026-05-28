@@ -1,0 +1,9 @@
+[
+  {
+    "transaction_id": "TXN_BILL_002",
+    "status": "wallet_provider_mismatch",
+    "mismatch_type": "wallet_debited_provider_not_confirmed",
+    "ticket_id": null,
+    "created_at": "2026-05-27T12:30:00Z"
+  }
+]

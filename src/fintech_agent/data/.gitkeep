@@ -1,0 +1,12 @@
+# This directory holds mock JSON data files for the MVP.
+# Files will be added in P0 phase:
+#   mock_users.json
+#   mock_transactions.json
+#   mock_wallet_ledger.json
+#   mock_train_orders.json
+#   mock_train_provider_status.json
+#   mock_utility_bills.json
+#   mock_utility_provider_status.json
+#   mock_refunds.json
+#   mock_reconciliation_cases.json
+#   mock_sop_rules.json

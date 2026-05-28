@@ -1,0 +1,26 @@
+[
+  {
+    "provider_ref_id": "EVN_REF_001",
+    "provider_status": "confirmed",
+    "bill_status": "paid",
+    "bill_code": "EVN123456",
+    "customer_code": "KH998877",
+    "amount": 720000
+  },
+  {
+    "provider_ref_id": "EVN_REF_002",
+    "provider_status": "not_confirmed",
+    "bill_status": "unpaid",
+    "bill_code": "EVN789012",
+    "customer_code": "KH112233",
+    "amount": 480000
+  },
+  {
+    "provider_ref_id": "WATER_REF_001",
+    "provider_status": "failed",
+    "bill_status": "unpaid",
+    "bill_code": "WATER_001",
+    "customer_code": "KH556677",
+    "amount": 310000
+  }
+]
