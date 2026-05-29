@@ -299,7 +299,7 @@ class TestEndToEndGraph:
         app = compile_graph()
         result = app.invoke({
             "raw_complaint": "Tôi mua vé tàu TXN_TRAIN_002 nhưng chưa nhận",
-            "user_id": "U001",
+            "user_id": "U002",
         })
         assert result["status"] == CaseStatus.CLOSED
         assert result["draft_output"]["type"] == "customer_response_draft"

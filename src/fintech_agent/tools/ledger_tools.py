@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fintech_agent.repositories import LedgerRepository, RecordNotFound
+from fintech_agent.database.repository_factory import get_ledger_repo
+from fintech_agent.repositories.base import RecordNotFound
 from fintech_agent.schemas.evidence import WalletLedger
 from fintech_agent.tools.tool_errors import ToolDataNotFound, ToolTimeout
 
@@ -47,7 +48,7 @@ def get_wallet_ledger(
     if transaction_id in _TIMEOUT_IDS:
         raise ToolTimeout(TOOL_NAME)
 
-    _repo = repo or LedgerRepository()
+    _repo = repo or get_ledger_repo()
     try:
         ledger = _repo.get_by_transaction_id(transaction_id)
         return LedgerResult(success=True, ledger=ledger)

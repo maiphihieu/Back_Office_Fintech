@@ -39,6 +39,8 @@ FORBIDDEN_ACTIONS: frozenset[str] = frozenset({
     "mark_payment_success",
     "delete_transaction",
     "modify_refund_status",
+    "execute_unlock_account",
+    "modify_account_status",
 })
 
 

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fintech_agent.repositories import RecordNotFound, UtilityProviderRepository
+from fintech_agent.database.repository_factory import get_utility_provider_repo
+from fintech_agent.repositories.base import RecordNotFound
 from fintech_agent.schemas.evidence import UtilityProviderStatus
 from fintech_agent.tools.tool_errors import ToolDataNotFound
 
@@ -29,7 +30,7 @@ def get_utility_bill_status(
     Raises:
         ToolDataNotFound: If no record matches.
     """
-    _repo = repo or UtilityProviderRepository()
+    _repo = repo or get_utility_provider_repo()
     try:
         status = _repo.get_by_ref_id(provider_ref_id)
         return UtilityProviderResult(success=True, provider_status=status)

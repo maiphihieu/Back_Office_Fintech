@@ -38,6 +38,7 @@ export function getServiceIcon(serviceType?: string | null, workflow?: string | 
   if (key.includes('electricity') || key.includes('electric') || key.includes('điện')) return '💡';
   if (key.includes('water') || key.includes('nước')) return '💧';
   if (key.includes('utility') || key.includes('bill')) return '📄';
+  if (key.includes('wallet') || key.includes('topup')) return '💳';
   if (key.includes('reconciliation')) return '🔄';
   return '📋';
 }

@@ -21,6 +21,27 @@ export interface EvidenceBundle {
   provider_status: Record<string, unknown> | null;
   refund_status: Record<string, unknown> | null;
   reconciliation_status: Record<string, unknown> | null;
+  account_status?: {
+    user_id: string;
+    wallet_id?: string;
+    account_status?: string;
+    withdrawal_enabled?: boolean;
+    lock_reason?: string;
+    current_balance?: number;
+    locked_at?: string;
+  } | null;
+  fraud_case?: {
+    fraud_case_id: string;
+    user_id: string;
+    risk_score?: number;
+    risk_level?: string;
+    fraud_status?: string;
+    trigger_reason?: string;
+    signals?: Record<string, unknown>;
+    recent_transactions?: Array<Record<string, unknown>>;
+    device_events?: Array<Record<string, unknown>>;
+    recommended_decision?: string;
+  } | null;
 }
 
 export interface Conflict {
@@ -37,6 +58,7 @@ export interface CaseResponse {
   selected_workflow: string | null;
   recommended_action: string | null;
   diagnosis: string | null;
+  diagnosis_message: string | null;
   risk_level: string | null;
   approval_required: boolean;
   approval_status: string | null;

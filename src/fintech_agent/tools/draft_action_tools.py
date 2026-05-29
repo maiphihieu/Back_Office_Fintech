@@ -47,6 +47,7 @@ class DraftStore:
         self._refund_drafts: dict[str, RefundRequestDraft] = {}
         self._reconciliation_drafts: dict[str, ReconciliationTicketDraft] = {}
         self._response_drafts: dict[str, CustomerResponseDraft] = {}
+        self._force_success_drafts: dict[str, "ForceSuccessDraft"] = {}
 
     def has_refund_draft(self, idempotency_key: str) -> bool:
         return idempotency_key in self._refund_drafts
@@ -65,6 +66,12 @@ class DraftStore:
 
     def get_reconciliation_draft(self, key: str) -> ReconciliationTicketDraft | None:
         return self._reconciliation_drafts.get(key)
+
+    def has_force_success_draft(self, idempotency_key: str) -> bool:
+        return idempotency_key in self._force_success_drafts
+
+    def save_force_success_draft(self, draft: "ForceSuccessDraft") -> None:
+        self._force_success_drafts[draft.idempotency_key] = draft
 
 
 # Singleton store for the session
@@ -317,3 +324,116 @@ def create_customer_response_draft(
     _store.save_response_draft(draft)
 
     return CustomerResponseResult(success=True, draft=draft)
+
+
+# ─── Force Success Draft ────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class ForceSuccessDraft:
+    """A draft to force-success a pending transaction.
+
+    This does NOT execute any financial operation.
+    It only creates a draft that requires human approval.
+    After approval, operations team manually updates the ledger.
+    """
+
+    case_id: str
+    transaction_id: str
+    user_id: str
+    amount: int
+    reason: str
+    evidence_summary: list[str]
+    idempotency_key: str
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class ForceSuccessDraftResult:
+    """Structured result from create_force_success_draft."""
+
+    success: bool
+    draft: ForceSuccessDraft | None = None
+    idempotency_key: str = ""
+    error: str | None = None
+
+
+def create_force_success_draft(
+    case_id: str,
+    transaction_id: str,
+    user_id: str,
+    amount: int,
+    reason: str,
+    evidence_summary: list[str],
+    store: DraftStore | None = None,
+) -> ForceSuccessDraftResult:
+    """Create a force-success draft for a pending wallet topup.
+
+    This is a HIGH-RISK action that requires human approval.
+    It does NOT modify any ledger or wallet balance.
+
+    Safety checks:
+      1. guard_action blocks forbidden actions
+      2. idempotency check prevents duplicates
+
+    Args:
+        case_id: The case this draft belongs to.
+        transaction_id: The stuck pending transaction.
+        user_id: The user who owns the transaction.
+        amount: The topup amount.
+        reason: Human-readable reason from rule engine.
+        evidence_summary: List of evidence items.
+        store: Optional DraftStore override.
+
+    Returns:
+        ForceSuccessDraftResult.
+
+    Raises:
+        SafetyViolation: If a forbidden action is attempted.
+        DuplicateActionError: If a duplicate draft is detected.
+        ToolValidationError: If input validation fails.
+    """
+    # 1. Safety guard — will raise SafetyViolation if forbidden
+    guard_action("create_force_success_draft", context=f"{case_id}:{transaction_id}")
+
+    # 2. Input validation
+    if amount <= 0:
+        raise ToolValidationError(
+            "create_force_success_draft", "amount", "must be positive"
+        )
+    if not evidence_summary or all(not s.strip() for s in evidence_summary):
+        raise ToolValidationError(
+            "create_force_success_draft",
+            "evidence_summary",
+            "must not be empty",
+        )
+
+    # 3. Idempotency key
+    idem_key = generate_idempotency_key(
+        transaction_id, ActionType.CREATE_FORCE_SUCCESS_DRAFT, amount
+    )
+
+    # 4. Check for duplicate in store
+    _store = store or get_default_store()
+    if _store.has_force_success_draft(idem_key):
+        raise DuplicateActionError("create_force_success_draft", idem_key)
+
+    # 5. Create draft
+    draft = ForceSuccessDraft(
+        case_id=case_id,
+        transaction_id=transaction_id,
+        user_id=user_id,
+        amount=amount,
+        reason=reason,
+        evidence_summary=evidence_summary,
+        idempotency_key=idem_key,
+    )
+
+    # 6. Save to store
+    _store.save_force_success_draft(draft)
+
+    return ForceSuccessDraftResult(
+        success=True,
+        draft=draft,
+        idempotency_key=idem_key,
+    )

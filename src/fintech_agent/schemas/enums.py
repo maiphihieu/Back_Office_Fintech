@@ -13,6 +13,8 @@ class ServiceType(StrEnum):
     TRAIN_TICKET = "train_ticket"
     ELECTRIC_BILL = "electric_bill"
     WATER_BILL = "water_bill"
+    WALLET_TOPUP = "wallet_topup"
+    ACCOUNT_SECURITY = "account_security"
     UNKNOWN = "unknown"
 
 
@@ -24,6 +26,8 @@ class IssueType(StrEnum):
     PROVIDER_FAILED = "provider_failed"
     PROVIDER_NO_RECORD = "provider_no_record"
     DUPLICATE_CHARGE = "duplicate_charge"
+    TOPUP_PENDING = "topup_pending"
+    ACCOUNT_LOCKED = "account_locked"
     UNKNOWN = "unknown"
 
 
@@ -115,6 +119,9 @@ class ActionType(StrEnum):
     DRAFT_CUSTOMER_RESPONSE = "draft_customer_response"
     CREATE_REFUND_REQUEST_DRAFT = "create_refund_request_draft"
     CREATE_RECONCILIATION_TICKET_DRAFT = "create_reconciliation_ticket_draft"
+    CREATE_FORCE_SUCCESS_DRAFT = "create_force_success_draft"
+    CREATE_UNLOCK_ACCOUNT_DRAFT = "create_unlock_account_draft"
+    CREATE_REQUEST_DOCUMENTS_RESPONSE_DRAFT = "create_request_documents_response_draft"
     MANUAL_REVIEW = "manual_review"
     WAIT_SLA = "wait_sla"
     NO_ACTION = "no_action"

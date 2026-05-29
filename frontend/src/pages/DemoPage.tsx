@@ -28,7 +28,7 @@ export default function DemoPage() {
       const res = await casesApi.create({
         raw_complaint: scenario.complaint,
         user_id: scenario.user_id,
-        transaction_id: scenario.transaction_id,
+        transaction_id: 'transaction_id' in scenario ? (scenario as { transaction_id: string }).transaction_id : undefined,
         service_type: scenario.service_type,
       });
 

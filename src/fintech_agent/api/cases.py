@@ -28,6 +28,8 @@ from fintech_agent.api.models import (
 )
 from fintech_agent.api.service import get_case_service
 from fintech_agent.graph.state import AgentState
+from fintech_agent.messages.wallet_topup_messages import get_cs_message
+from fintech_agent.schemas.enums import ActionType
 from fintech_agent.schemas.enums import CaseStatus
 from fintech_agent.workflows.approval_service import (
     AlreadyDecidedError,
@@ -136,13 +138,23 @@ def _state_to_response(state: AgentState) -> CaseResponse:
     # Audit event count
     audit_ids = state.get("audit_event_ids", [])
 
+    # Diagnosis message (human-readable) for wallet_topup
+    diagnosis_raw = decision.get("diagnosis") if isinstance(decision, dict) else None
+    diagnosis_message = None
+    if state.get("selected_workflow") == "wallet_topup" and diagnosis_raw and recommended_action:
+        try:
+            diagnosis_message = get_cs_message(ActionType(recommended_action), diagnosis_raw)
+        except (ValueError, KeyError):
+            pass
+
     return CaseResponse(
         case_id=state.get("case_id", ""),
         status=status_val,
         user_id=state.get("user_id"),
         selected_workflow=state.get("selected_workflow"),
         recommended_action=recommended_action,
-        diagnosis=decision.get("diagnosis") if isinstance(decision, dict) else None,
+        diagnosis=diagnosis_raw,
+        diagnosis_message=diagnosis_message,
         risk_level=risk_level,
         approval_required=state.get("approval_required", False),
         approval_status=_enum_val(state.get("approval_status")),

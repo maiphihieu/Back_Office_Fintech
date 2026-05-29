@@ -6,6 +6,7 @@ from fintech_agent.audit import AuditLogger
 from fintech_agent.graph.state import AgentState
 from fintech_agent.rules.train_ticket_rules import decide_train_ticket
 from fintech_agent.rules.utility_bill_rules import decide_utility_bill
+from fintech_agent.rules.wallet_topup_rules import decide_wallet_topup
 from fintech_agent.schemas.enums import AuditEventType, CaseStatus
 from fintech_agent.schemas.evidence import EvidenceBundle
 
@@ -29,6 +30,19 @@ def apply_rules(state: AgentState, audit: AuditLogger | None = None) -> AgentSta
             ledger=evidence.wallet_ledger,
             provider=evidence.utility_provider,
             refund=evidence.refund_status,
+            evidence=evidence,
+        )
+    elif workflow == "wallet_topup":
+        decision = decide_wallet_topup(
+            transaction=evidence.transaction,
+            reconciliation=evidence.reconciliation_status,
+            evidence=evidence,
+        )
+    elif workflow == "fraud_account_lock":
+        from fintech_agent.rules.fraud_account_lock_rules import decide_fraud_account_lock
+        decision = decide_fraud_account_lock(
+            account_status=evidence.account_status,
+            fraud_case=evidence.fraud_case,
             evidence=evidence,
         )
     else:

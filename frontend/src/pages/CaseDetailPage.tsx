@@ -77,6 +77,9 @@ export default function CaseDetailPage() {
   const ei = caseData.extracted_info;
   const ev = caseData.evidence;
   const isRefundAction = caseData.recommended_action === 'create_refund_request_draft';
+  const isForceSuccessAction = caseData.recommended_action === 'create_force_success_draft';
+  const isUnlockAction = caseData.recommended_action === 'create_unlock_account_draft';
+  const isRequestDocsAction = caseData.recommended_action === 'create_request_documents_response_draft';
   const isWaiting = caseData.status === 'waiting_approval';
 
   /** Translate an evidence key */
@@ -126,6 +129,30 @@ export default function CaseDetailPage() {
         <div className="alert alert-warning mb-3">
           <span className="alert-icon">💰</span>
           <div><strong>{t('detail.refund_alert')}</strong> {t('detail.refund_alert2')}</div>
+        </div>
+      )}
+
+      {/* Force Success draft warning */}
+      {isForceSuccessAction && (
+        <div className="alert alert-warning mb-3">
+          <span className="alert-icon">⚡</span>
+          <div><strong>{t('detail.force_success_alert')}</strong> {t('detail.force_success_alert2')}</div>
+        </div>
+      )}
+
+      {/* Unlock account draft warning */}
+      {isUnlockAction && (
+        <div className="alert alert-warning mb-3">
+          <span className="alert-icon">🔓</span>
+          <div><strong>{t('detail.unlock_alert')}</strong> {t('detail.unlock_alert2')}</div>
+        </div>
+      )}
+
+      {/* Request documents draft warning */}
+      {isRequestDocsAction && (
+        <div className="alert alert-warning mb-3">
+          <span className="alert-icon">📋</span>
+          <div><strong>{t('detail.request_docs_alert')}</strong> {t('detail.request_docs_alert2')}</div>
         </div>
       )}
 
@@ -185,7 +212,10 @@ export default function CaseDetailPage() {
             <div className="card mb-3">
               <h4 className="mb-2">{t('detail.workflow_decision')}</h4>
               <div className="detail-row"><span className="label">{t('detail.workflow')}</span><span className="value">{t(`workflow.${caseData.selected_workflow}`)}</span></div>
-              <div className="detail-row"><span className="label">{t('detail.diagnosis')}</span><span className="value">{caseData.diagnosis || '—'}</span></div>
+              <div className="detail-row"><span className="label">{t('detail.diagnosis')}</span><span className="value">{caseData.diagnosis_message || caseData.diagnosis || '—'}</span></div>
+              {caseData.diagnosis_message && caseData.diagnosis && (
+                <div className="detail-row"><span className="label" style={{ fontSize: '0.8rem', opacity: 0.6 }}>{t('detail.diagnosis_code') || 'Mã nội bộ'}</span><span className="value" style={{ fontSize: '0.8rem', opacity: 0.6, fontFamily: 'monospace' }}>{caseData.diagnosis}</span></div>
+              )}
               <div className="detail-row"><span className="label">{t('detail.action')}</span><span className="value">{t(`action.${caseData.recommended_action}`)}</span></div>
               <div className="detail-row"><span className="label">{t('detail.risk_level')}</span><span className="value">{t(`risk.${caseData.risk_level}`)}</span></div>
               <div className="detail-row"><span className="label">{t('detail.approval_required')}</span><span className="value">{caseData.approval_required ? t('common.yes') : t('common.no')}</span></div>
@@ -257,6 +287,64 @@ export default function CaseDetailPage() {
                     ))}
                   </div>
                 )}
+
+                {/* Reconciliation Status */}
+                {ev.reconciliation_status && (
+                  <div className="detail-section">
+                    <h4>{t('detail.evidence_reconciliation')} <span className="badge badge-cyan" style={{ fontSize: '0.65rem' }}>{t('detail.evidence_reconciliation_badge')}</span></h4>
+                    {Object.entries(ev.reconciliation_status).filter(([k]) => k !== 'details').map(([k, v]) => (
+                      <div className="detail-row" key={k}>
+                        <span className="label">{ek(k)}</span>
+                        <span className="value">{typeof v === 'boolean' ? (v ? '✅ Có' : '❌ Không') : typeof v === 'number' ? formatCurrency(v) : String(v ?? '—')}</span>
+                      </div>
+                    ))}
+                    {/* Render bank details from nested details object */}
+                    {typeof ev.reconciliation_status.details === 'object' && ev.reconciliation_status.details != null && Object.entries(ev.reconciliation_status.details as Record<string, unknown>).map(([k, v]) => (
+                      <div className="detail-row" key={`details_${k}`}>
+                        <span className="label">{ek(k)}</span>
+                        <span className="value">{typeof v === 'boolean' ? (v ? '✅ Có' : '❌ Không') : typeof v === 'number' ? formatCurrency(v) : String(v ?? '—')}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Account Status (Fraud Use Case) */}
+                {ev.account_status && (
+                  <div className="detail-section">
+                    <h4>{t('detail.evidence_account')} <span className="badge badge-amber" style={{ fontSize: '0.65rem' }}>{t('detail.evidence_account_badge')}</span></h4>
+                    {Object.entries(ev.account_status).filter(([k]) => !['recent_transactions', 'device_events'].includes(k)).map(([k, v]) => (
+                      <div className="detail-row" key={k}>
+                        <span className="label">{ek(k)}</span>
+                        <span className="value">{typeof v === 'boolean' ? (v ? '✅' : '❌') : typeof v === 'number' ? formatCurrency(v) : String(v ?? '—')}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Fraud Case (Fraud Use Case) */}
+                {ev.fraud_case && (
+                  <div className="detail-section">
+                    <h4>{t('detail.evidence_fraud')} <span className="badge badge-red" style={{ fontSize: '0.65rem' }}>{t('detail.evidence_fraud_badge')}</span></h4>
+                    {Object.entries(ev.fraud_case).filter(([k]) => !['signals', 'recent_transactions', 'device_events'].includes(k)).map(([k, v]) => (
+                      <div className="detail-row" key={k}>
+                        <span className="label">{ek(k)}</span>
+                        <span className="value">{typeof v === 'number' ? String(v) : String(v ?? '—')}</span>
+                      </div>
+                    ))}
+                    {/* Signals as sub-section */}
+                    {ev.fraud_case.signals && Object.keys(ev.fraud_case.signals).length > 0 && (
+                      <div style={{ marginTop: 8 }}>
+                        <div className="label" style={{ marginBottom: 4 }}>{ek('signals')}</div>
+                        {Object.entries(ev.fraud_case.signals).map(([k, v]) => (
+                          <div className="detail-row" key={`sig_${k}`}>
+                            <span className="label" style={{ fontSize: '0.8rem', paddingLeft: 12 }}>{k.replace(/_/g, ' ')}</span>
+                            <span className="value">{typeof v === 'boolean' ? (v ? '🔴 Yes' : '🟢 No') : String(v ?? '—')}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -269,6 +357,27 @@ export default function CaseDetailPage() {
                   <div className="alert alert-warning mb-2" style={{ fontSize: '0.8rem' }}>
                     <span className="alert-icon">⚠️</span>
                     <span>{t('detail.approval_refund_warning')}</span>
+                  </div>
+                )}
+
+                {isForceSuccessAction && (
+                  <div className="alert alert-warning mb-2" style={{ fontSize: '0.8rem' }}>
+                    <span className="alert-icon">⚡</span>
+                    <span>{t('detail.approval_force_success_warning')}</span>
+                  </div>
+                )}
+
+                {isUnlockAction && (
+                  <div className="alert alert-warning mb-2" style={{ fontSize: '0.8rem' }}>
+                    <span className="alert-icon">🔓</span>
+                    <span>{t('detail.approval_unlock_warning')}</span>
+                  </div>
+                )}
+
+                {isRequestDocsAction && (
+                  <div className="alert alert-warning mb-2" style={{ fontSize: '0.8rem' }}>
+                    <span className="alert-icon">📋</span>
+                    <span>{t('detail.approval_request_docs_warning')}</span>
                   </div>
                 )}
 

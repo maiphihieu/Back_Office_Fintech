@@ -52,7 +52,7 @@ class TestCreateCase:
         """TRAIN_002: ticket issued → closed (no approval)."""
         resp = client.post("/cases", json={
             "raw_complaint": "Tôi mua vé tàu TXN_TRAIN_002 nhưng chưa nhận",
-            "user_id": "U001",
+            "user_id": "U002",  # TXN_TRAIN_002 belongs to U002
         })
         assert resp.status_code == 201
         data = resp.json()
@@ -164,6 +164,9 @@ class TestApproveCase:
 
     def test_approve_audit_trail(self, client: TestClient) -> None:
         """Approval must appear in audit trail."""
+        from fintech_agent.tools.draft_action_tools import reset_default_store
+        reset_default_store()  # Clear idempotency store from prior tests
+
         case_id = self._create_pending_case(client)
         client.post(f"/cases/{case_id}/approve", json={
             "approver": "ops_admin",

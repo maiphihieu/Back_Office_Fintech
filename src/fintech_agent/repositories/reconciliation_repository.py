@@ -26,5 +26,13 @@ class ReconciliationRepository(BaseRepository):
         """
         for record in self._load_data():
             if record["transaction_id"] == transaction_id:
-                return ReconciliationStatus(**record)
+                # Extract bank fields from nested details if present
+                details = record.get("details") or {}
+                flat = {k: v for k, v in record.items() if k != "details"}
+                for field in ("bank_status", "bank_amount",
+                              "money_received_in_master_wallet",
+                              "bank_ref_id", "note"):
+                    if field not in flat and field in details:
+                        flat[field] = details[field]
+                return ReconciliationStatus(**flat)
         return None

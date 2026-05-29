@@ -21,6 +21,7 @@ const CHIP_COMPLAINTS: Record<string, string> = {
   chip_train: 'Tôi đã thanh toán mua vé tàu mã giao dịch TXN_TRAIN_001 nhưng chưa nhận được vé. Số tiền 450,000 VND đã bị trừ. Mong được hỗ trợ hoàn tiền.',
   chip_bill: 'Tôi đã thanh toán tiền điện TXN_BILL_002 nhưng nhà cung cấp chưa xác nhận thanh toán. Mong hỗ trợ.',
   chip_provider: 'Tôi thanh toán tiền nước TXN_BILL_003 nhưng bị lỗi. Tiền đã bị trừ 310,000 VND nhưng hóa đơn chưa được thanh toán.',
+  chip_topup: 'Tôi nạp tiền từ ngân hàng vào ví, tài khoản ngân hàng đã trừ tiền nhưng ví vẫn báo 0 đồng. Mã giao dịch TXN_TOPUP_001',
   chip_conflict: 'Giao dịch TXN_CONFLICT_001 mua vé tàu bị lỗi. Ví đã trừ tiền nhưng hệ thống hiện đang pending.',
 };
 
@@ -330,7 +331,7 @@ export default function CreateCasePage() {
         {/* Quick scenario chips */}
         {messages.length === 0 && !isViewingHistory && (
           <div className="chip-bar">
-            {(['chip_train', 'chip_bill', 'chip_provider', 'chip_conflict'] as const).map(chip => (
+            {(['chip_train', 'chip_bill', 'chip_provider', 'chip_topup', 'chip_conflict'] as const).map(chip => (
               <button
                 key={chip}
                 className="scenario-chip"
@@ -363,6 +364,7 @@ export default function CreateCasePage() {
                     <option value="train_ticket">{t('service.train_ticket')}</option>
                     <option value="electric_bill">{t('service.electric_bill')}</option>
                     <option value="water_bill">{t('service.water_bill')}</option>
+                    <option value="wallet_topup">{t('service.wallet_topup')}</option>
                   </select>
                 </div>
               </div>
@@ -398,7 +400,7 @@ export default function CreateCasePage() {
         <div className="panel-card">
           <h4 className="panel-title">⚙️ {t('create.panel_workflow')}</h4>
           <div className="panel-list">
-            {(['train_ticket', 'utility_bill', 'train_ticket_reconciliation', 'utility_bill_reconciliation'] as const).map(wf => (
+            {(['train_ticket', 'utility_bill', 'wallet_topup', 'train_ticket_reconciliation', 'utility_bill_reconciliation'] as const).map(wf => (
               <div key={wf} className={`workflow-item ${lastResult?.selected_workflow === wf ? 'active' : ''}`}>
                 <span className="workflow-dot" />
                 {t(`workflow.${wf}`)}
@@ -452,6 +454,7 @@ function ResultCard({ result, t, navigate, onNewCase }: {
 }) {
   const ei = result.extracted_info;
   const isRefund = result.recommended_action === 'create_refund_request_draft';
+  const isForceSuccess = result.recommended_action === 'create_force_success_draft';
   const errors = result.errors || [];
 
   /* ── Classify errors for friendly alerts ── */
@@ -504,6 +507,11 @@ function ResultCard({ result, t, navigate, onNewCase }: {
         {isRefund && (
           <div className="alert alert-warning" style={{ margin: '10px 0', fontSize: '0.8rem' }}>
             <span className="alert-icon">💰</span>{t('create.alert_refund')}
+          </div>
+        )}
+        {isForceSuccess && (
+          <div className="alert alert-warning" style={{ margin: '10px 0', fontSize: '0.8rem' }}>
+            <span className="alert-icon">⚡</span>{t('create.alert_force_success')}
           </div>
         )}
         {ei && ei.missing_fields.length > 0 && !hasCriticalMissing && (

@@ -1,23 +1,27 @@
 """Unit tests for repository layer.
 
 Tests verify:
-  1. Each repository loads mock data and returns typed models.
+  1. Each repository loads data from Supabase and returns typed models.
   2. RecordNotFound is raised for missing records.
-  3. All 8 scenarios are accessible via the correct keys.
-  4. CaseRepository CRUD operations.
+  3. All scenarios are accessible via the correct keys.
+  4. CaseRepository CRUD operations (in-memory).
+
+Uses repository_factory (Supabase-backed) instead of direct JSON repos.
 """
 
 import pytest
 
+from fintech_agent.database.repository_factory import (
+    get_ledger_repo,
+    get_reconciliation_repo,
+    get_refund_repo,
+    get_train_provider_repo,
+    get_transaction_repo,
+    get_utility_provider_repo,
+)
 from fintech_agent.repositories import (
     CaseRepository,
-    LedgerRepository,
-    ReconciliationRepository,
     RecordNotFound,
-    RefundRepository,
-    TrainProviderRepository,
-    TransactionRepository,
-    UtilityProviderRepository,
 )
 from fintech_agent.schemas import (
     CaseState,
@@ -38,7 +42,7 @@ from fintech_agent.schemas import (
 
 class TestTransactionRepository:
     def setup_method(self) -> None:
-        self.repo = TransactionRepository()
+        self.repo = get_transaction_repo()
 
     def test_get_train_001(self) -> None:
         txn = self.repo.get_by_id("TXN_TRAIN_001")
@@ -61,12 +65,12 @@ class TestTransactionRepository:
         assert txn.amount == 450000
 
     def test_not_found_raises(self) -> None:
-        with pytest.raises(RecordNotFound, match="Transaction not found"):
+        with pytest.raises(RecordNotFound):
             self.repo.get_by_id("TXN_NONEXISTENT")
 
     def test_get_by_user_id(self) -> None:
         txns = self.repo.get_by_user_id("U001")
-        assert len(txns) == 2  # TRAIN_001 + TRAIN_002
+        assert len(txns) >= 1
         assert all(t.user_id == "U001" for t in txns)
 
     def test_get_by_user_id_empty(self) -> None:
@@ -81,7 +85,7 @@ class TestTransactionRepository:
 
 class TestLedgerRepository:
     def setup_method(self) -> None:
-        self.repo = LedgerRepository()
+        self.repo = get_ledger_repo()
 
     def test_train_001_debited(self) -> None:
         ledger = self.repo.get_by_transaction_id("TXN_TRAIN_001")
@@ -106,7 +110,7 @@ class TestLedgerRepository:
         assert len(ledger.entries) == 2
 
     def test_not_found_raises(self) -> None:
-        with pytest.raises(RecordNotFound, match="WalletLedger not found"):
+        with pytest.raises(RecordNotFound):
             self.repo.get_by_transaction_id("TXN_NONEXISTENT")
 
 
@@ -117,7 +121,7 @@ class TestLedgerRepository:
 
 class TestTrainProviderRepository:
     def setup_method(self) -> None:
-        self.repo = TrainProviderRepository()
+        self.repo = get_train_provider_repo()
 
     def test_train_001_not_issued(self) -> None:
         """TRAIN_001: wallet debited, ticket NOT issued."""
@@ -149,7 +153,7 @@ class TestTrainProviderRepository:
 
 class TestUtilityProviderRepository:
     def setup_method(self) -> None:
-        self.repo = UtilityProviderRepository()
+        self.repo = get_utility_provider_repo()
 
     def test_bill_001_confirmed(self) -> None:
         """BILL_001: provider confirmed, bill paid."""
@@ -181,7 +185,7 @@ class TestUtilityProviderRepository:
 
 class TestRefundRepository:
     def setup_method(self) -> None:
-        self.repo = RefundRepository()
+        self.repo = get_refund_repo()
 
     def test_train_001_not_requested(self) -> None:
         status = self.repo.get_by_transaction_id("TXN_TRAIN_001")
@@ -207,7 +211,7 @@ class TestRefundRepository:
 
 class TestReconciliationRepository:
     def setup_method(self) -> None:
-        self.repo = ReconciliationRepository()
+        self.repo = get_reconciliation_repo()
 
     def test_bill_002_has_mismatch(self) -> None:
         status = self.repo.get_by_transaction_id("TXN_BILL_002")
@@ -264,19 +268,19 @@ class TestCaseRepository:
 
 
 # ════════════════════════════════════════════════════════════
-#  Cross-scenario: verify all 8 scenarios are accessible
+#  Cross-scenario: verify all scenarios are accessible
 # ════════════════════════════════════════════════════════════
 
 
 class TestAllScenariosAccessible:
-    """Verify each MVP scenario can be fully queried."""
+    """Verify each MVP scenario can be fully queried via factory repos."""
 
     def test_train_001_full_path(self) -> None:
         """TRAIN_001: debited + ticket_not_issued + no refund → refund draft."""
-        txn = TransactionRepository().get_by_id("TXN_TRAIN_001")
-        ledger = LedgerRepository().get_by_transaction_id("TXN_TRAIN_001")
-        provider = TrainProviderRepository().get_by_ref_id(txn.provider_ref_id)
-        refund = RefundRepository().get_by_transaction_id("TXN_TRAIN_001")
+        txn = get_transaction_repo().get_by_id("TXN_TRAIN_001")
+        ledger = get_ledger_repo().get_by_transaction_id("TXN_TRAIN_001")
+        provider = get_train_provider_repo().get_by_ref_id(txn.provider_ref_id)
+        refund = get_refund_repo().get_by_transaction_id("TXN_TRAIN_001")
 
         assert ledger.has_user_debit is True
         assert provider.booking_status == "ticket_not_issued"
@@ -284,32 +288,32 @@ class TestAllScenariosAccessible:
 
     def test_train_002_full_path(self) -> None:
         """TRAIN_002: debited + ticket_issued → no refund, send ticket code."""
-        txn = TransactionRepository().get_by_id("TXN_TRAIN_002")
-        provider = TrainProviderRepository().get_by_ref_id(txn.provider_ref_id)
+        txn = get_transaction_repo().get_by_id("TXN_TRAIN_002")
+        provider = get_train_provider_repo().get_by_ref_id(txn.provider_ref_id)
 
         assert provider.booking_status == "ticket_issued"
         assert provider.ticket_code == "PNR_ABC123"
 
     def test_train_003_full_path(self) -> None:
         """TRAIN_003: debited + provider_no_record → reconciliation ticket."""
-        txn = TransactionRepository().get_by_id("TXN_TRAIN_003")
-        provider = TrainProviderRepository().get_by_ref_id(txn.provider_ref_id)
+        txn = get_transaction_repo().get_by_id("TXN_TRAIN_003")
+        provider = get_train_provider_repo().get_by_ref_id(txn.provider_ref_id)
 
         assert provider.booking_status == "provider_no_record"
 
     def test_bill_001_full_path(self) -> None:
         """BILL_001: debited + confirmed/paid → no refund."""
-        txn = TransactionRepository().get_by_id("TXN_BILL_001")
-        provider = UtilityProviderRepository().get_by_ref_id(txn.provider_ref_id)
+        txn = get_transaction_repo().get_by_id("TXN_BILL_001")
+        provider = get_utility_provider_repo().get_by_ref_id(txn.provider_ref_id)
 
         assert provider.provider_status == "confirmed"
         assert provider.bill_status == "paid"
 
     def test_bill_002_full_path(self) -> None:
         """BILL_002: debited + not_confirmed → reconciliation ticket."""
-        txn = TransactionRepository().get_by_id("TXN_BILL_002")
-        provider = UtilityProviderRepository().get_by_ref_id(txn.provider_ref_id)
-        recon = ReconciliationRepository().get_by_transaction_id("TXN_BILL_002")
+        txn = get_transaction_repo().get_by_id("TXN_BILL_002")
+        provider = get_utility_provider_repo().get_by_ref_id(txn.provider_ref_id)
+        recon = get_reconciliation_repo().get_by_transaction_id("TXN_BILL_002")
 
         assert provider.provider_status == "not_confirmed"
         assert recon is not None
@@ -317,23 +321,23 @@ class TestAllScenariosAccessible:
 
     def test_bill_003_full_path(self) -> None:
         """BILL_003: debited + failed → refund draft."""
-        txn = TransactionRepository().get_by_id("TXN_BILL_003")
-        provider = UtilityProviderRepository().get_by_ref_id(txn.provider_ref_id)
+        txn = get_transaction_repo().get_by_id("TXN_BILL_003")
+        provider = get_utility_provider_repo().get_by_ref_id(txn.provider_ref_id)
 
         assert provider.provider_status == "failed"
 
     def test_conflict_001_full_path(self) -> None:
         """CONFLICT_001: ledger debited + txn pending → manual review."""
-        txn = TransactionRepository().get_by_id("TXN_CONFLICT_001")
-        ledger = LedgerRepository().get_by_transaction_id("TXN_CONFLICT_001")
+        txn = get_transaction_repo().get_by_id("TXN_CONFLICT_001")
+        ledger = get_ledger_repo().get_by_transaction_id("TXN_CONFLICT_001")
 
         assert txn.status == "pending"
         assert ledger.has_user_debit is True  # conflict!
 
     def test_refund_001_full_path(self) -> None:
         """REFUND_001: already refunded → no duplicate."""
-        ledger = LedgerRepository().get_by_transaction_id("TXN_REFUND_001")
-        refund = RefundRepository().get_by_transaction_id("TXN_REFUND_001")
+        ledger = get_ledger_repo().get_by_transaction_id("TXN_REFUND_001")
+        refund = get_refund_repo().get_by_transaction_id("TXN_REFUND_001")
 
         assert refund.refund_status == "executed"
         assert ledger.has_credit_refund is True

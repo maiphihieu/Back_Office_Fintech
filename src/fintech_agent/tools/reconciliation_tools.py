@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fintech_agent.repositories import ReconciliationRepository
+from fintech_agent.database.repository_factory import get_reconciliation_repo
 from fintech_agent.schemas.evidence import ReconciliationStatus
 
 TOOL_NAME = "get_reconciliation_status"
@@ -28,6 +28,6 @@ def get_reconciliation_status(
     Unlike other tools, this returns success=True with reconciliation=None
     when no record exists (absence of reconciliation is normal).
     """
-    _repo = repo or ReconciliationRepository()
+    _repo = repo or get_reconciliation_repo()
     result = _repo.get_by_transaction_id(transaction_id)
     return ReconciliationResult(success=True, reconciliation=result)

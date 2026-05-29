@@ -54,6 +54,7 @@ export function ActionBadge({ action }: { action: string | null }) {
     create_refund_request_draft: 'badge-amber',
     draft_customer_response: 'badge-green',
     create_reconciliation_ticket_draft: 'badge-blue',
+    create_force_success_draft: 'badge-purple',
     manual_review: 'badge-red',
     no_action: 'badge-neutral',
     wait_sla: 'badge-cyan',

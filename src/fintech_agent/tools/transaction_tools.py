@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fintech_agent.repositories import RecordNotFound, TransactionRepository
+from fintech_agent.database.repository_factory import get_transaction_repo
+from fintech_agent.repositories.base import RecordNotFound
 from fintech_agent.schemas.evidence import Transaction
 from fintech_agent.tools.tool_errors import ToolDataNotFound, ToolTimeout
 
@@ -43,7 +44,7 @@ def get_transaction(
     if transaction_id in _TIMEOUT_IDS:
         raise ToolTimeout(TOOL_NAME)
 
-    _repo = repo or TransactionRepository()
+    _repo = repo or get_transaction_repo()
     try:
         txn = _repo.get_by_id(transaction_id)
         return TransactionResult(success=True, transaction=txn)

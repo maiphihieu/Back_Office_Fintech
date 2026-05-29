@@ -58,6 +58,10 @@ def extract_info(
             selected_workflow = "train_ticket"
         elif st in ("electric_bill", "water_bill"):
             selected_workflow = "utility_bill"
+        elif st == "wallet_topup":
+            selected_workflow = "wallet_topup"
+        elif st == "account_security":
+            selected_workflow = "fraud_account_lock"
 
     # ── Missing fields (use extractor's or compute) ───────────
     missing = list(extracted.missing_fields) if extracted.missing_fields else []

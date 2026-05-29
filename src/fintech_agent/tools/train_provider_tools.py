@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fintech_agent.repositories import RecordNotFound, TrainProviderRepository
+from fintech_agent.database.repository_factory import get_train_provider_repo
+from fintech_agent.repositories.base import RecordNotFound
 from fintech_agent.schemas.evidence import TrainProviderStatus
 from fintech_agent.tools.tool_errors import ToolDataNotFound, ToolTimeout
 
@@ -36,7 +37,7 @@ def get_train_provider_status(
     if provider_ref_id in _TIMEOUT_REFS:
         raise ToolTimeout(TOOL_NAME)
 
-    _repo = repo or TrainProviderRepository()
+    _repo = repo or get_train_provider_repo()
     try:
         status = _repo.get_by_ref_id(provider_ref_id)
         return TrainProviderResult(success=True, provider_status=status)

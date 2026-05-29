@@ -118,13 +118,59 @@ class RefundStatus(BaseModel):
 
 
 class ReconciliationStatus(BaseModel):
-    """Reconciliation record — tracks wallet↔provider mismatch."""
+    """Reconciliation record — tracks wallet↔provider mismatch.
+
+    Extended for wallet_topup use case: bank-side reconciliation fields
+    are stored in the `details` jsonb column in Supabase.
+    """
 
     transaction_id: str = Field(..., min_length=1)
     status: str | None = None
     mismatch_type: str | None = None
     ticket_id: str | None = None
     created_at: datetime | None = None
+    # Bank reconciliation fields (wallet_topup)
+    bank_status: str | None = None
+    bank_amount: int | None = None
+    money_received_in_master_wallet: bool | None = None
+    bank_ref_id: str | None = None
+    note: str | None = None
+
+
+# ─── Account Status (fraud/lock) ────────────────────────────
+
+
+class AccountStatus(BaseModel):
+    """Account status — source of truth for account lock state.
+
+    Used in use case 2: Account locked by Fraud Detection.
+    """
+
+    user_id: str = Field(..., min_length=1)
+    wallet_id: str | None = None
+    account_status: str | None = None
+    withdrawal_enabled: bool | None = None
+    lock_reason: str | None = None
+    current_balance: int | float | None = None
+    locked_at: datetime | None = None
+
+
+class FraudCase(BaseModel):
+    """Fraud case record — evidence from fraud detection system.
+
+    Contains risk scoring, signals, and recommended decision.
+    """
+
+    fraud_case_id: str = Field(..., min_length=1)
+    user_id: str = Field(..., min_length=1)
+    risk_score: int | None = None
+    risk_level: str | None = None
+    fraud_status: str | None = None
+    trigger_reason: str | None = None
+    signals: dict = Field(default_factory=dict)
+    recent_transactions: list[dict] = Field(default_factory=list)
+    device_events: list[dict] = Field(default_factory=list)
+    recommended_decision: str | None = None
 
 
 # ─── Evidence Conflict ──────────────────────────────────────
@@ -160,6 +206,8 @@ class EvidenceBundle(BaseModel):
     utility_provider: UtilityProviderStatus | None = None
     refund_status: RefundStatus | None = None
     reconciliation_status: ReconciliationStatus | None = None
+    account_status: AccountStatus | None = None
+    fraud_case: FraudCase | None = None
     conflicts: list[EvidenceConflict] = Field(default_factory=list)
     tool_errors: list[str] = Field(
         default_factory=list,
@@ -176,3 +224,4 @@ class EvidenceBundle(BaseModel):
         """Return True if critical tools (wallet_ledger, transaction) failed."""
         critical = {"get_wallet_ledger", "get_transaction"}
         return bool(critical & set(self.tool_errors))
+

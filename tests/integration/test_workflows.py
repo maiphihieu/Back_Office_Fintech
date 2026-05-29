@@ -96,7 +96,7 @@ class TestTrainTicketWorkflows:
         audit = AuditLogger()
         result = _run_phase1(
             "Tôi mua vé tàu TXN_TRAIN_002 nhưng chưa nhận",
-            "U001", audit,
+            "U002", audit,  # TXN_TRAIN_002 belongs to U002
         )
 
         assert result["status"] == CaseStatus.CLOSED
@@ -220,6 +220,9 @@ class TestApprovalService:
 
     def test_approve_creates_draft(self) -> None:
         """approve_case → draft created + CLOSED."""
+        from fintech_agent.tools.draft_action_tools import reset_default_store
+        reset_default_store()  # Clear idempotency store from prior tests
+
         audit = AuditLogger()
         state = self._get_pending_state(audit)
         service = ApprovalService(audit=audit)
@@ -329,6 +332,9 @@ class TestApprovalService:
 
     def test_approve_audit_trail(self) -> None:
         """Approved case must have full audit trail."""
+        from fintech_agent.tools.draft_action_tools import reset_default_store
+        reset_default_store()  # Clear idempotency store from prior tests
+
         audit = AuditLogger()
         state = self._get_pending_state(audit)
         service = ApprovalService(audit=audit)
@@ -372,7 +378,7 @@ class TestAuditTrail:
         audit = AuditLogger()
         result = _run_phase1(
             "TXN_TRAIN_002 vé tàu",
-            "U001", audit,
+            "U002", audit,  # TXN_TRAIN_002 belongs to U002
         )
 
         events = audit.get_events_by_case(result["case_id"])

@@ -32,6 +32,15 @@ def classify_risk(action: ActionType, amount: int = 0) -> RiskLevel:
             return RiskLevel.HIGH
         return RiskLevel.MEDIUM
 
+    if action == ActionType.CREATE_FORCE_SUCCESS_DRAFT:
+        return RiskLevel.HIGH
+
+    if action == ActionType.CREATE_UNLOCK_ACCOUNT_DRAFT:
+        return RiskLevel.HIGH
+
+    if action == ActionType.CREATE_REQUEST_DOCUMENTS_RESPONSE_DRAFT:
+        return RiskLevel.HIGH
+
     if action == ActionType.MANUAL_REVIEW:
         return RiskLevel.HIGH
 

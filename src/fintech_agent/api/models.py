@@ -75,6 +75,7 @@ class CaseResponse(BaseModel):
     selected_workflow: str | None = None
     recommended_action: str | None = None
     diagnosis: str | None = None
+    diagnosis_message: str | None = None
     risk_level: str | None = None
     approval_required: bool = False
     approval_status: str | None = None

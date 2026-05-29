@@ -24,7 +24,11 @@ def recommend_action(state: AgentState, audit: AuditLogger | None = None) -> Age
 
     action_type = ActionType(decision["action"])
     evidence = state.get("evidence_bundle")
-    amount = evidence.wallet_ledger.debit_amount if evidence and evidence.wallet_ledger else 0
+    # For wallet_topup, amount comes from transaction (no wallet_ledger)
+    if state.get("selected_workflow") == "wallet_topup":
+        amount = evidence.transaction.amount if evidence and evidence.transaction else 0
+    else:
+        amount = evidence.wallet_ledger.debit_amount if evidence and evidence.wallet_ledger else 0
     risk = classify_risk(action_type, amount)
 
     recommended = RecommendedAction(
