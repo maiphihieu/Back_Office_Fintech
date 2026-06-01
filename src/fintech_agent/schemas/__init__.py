@@ -49,6 +49,18 @@ from fintech_agent.schemas.audit import AuditEvent
 # --- Case State ---
 from fintech_agent.schemas.case_state import CaseState, ExtractedInfo
 
+# --- Claim Verification ---
+from fintech_agent.schemas.claim_verification import (
+    Claim,
+    ClaimType,
+    ClaimVerification,
+    ClaimVerificationSummary,
+    VerificationStatus,
+)
+
+# --- Response Generation ---
+from fintech_agent.schemas.response_generation import GeneratedResponse
+
 __all__ = [
     # Enums
     "ActionType",
@@ -83,4 +95,12 @@ __all__ = [
     # Case State
     "CaseState",
     "ExtractedInfo",
+    # Claim Verification
+    "Claim",
+    "ClaimType",
+    "ClaimVerification",
+    "ClaimVerificationSummary",
+    "VerificationStatus",
+    # Response Generation
+    "GeneratedResponse",
 ]

@@ -60,10 +60,10 @@ def after_route_workflow(
     return "apply_rules"
 
 
-def after_recommend_action(
+def after_generate_response(
     state: AgentState,
 ) -> Literal["approval_gate", "create_draft"]:
-    """After recommendation: if approval needed → gate, else → draft."""
+    """After generate_response: if approval needed → gate, else → draft."""
     if state.get("status") == CaseStatus.WAITING_APPROVAL:
         return "approval_gate"
     return "create_draft"

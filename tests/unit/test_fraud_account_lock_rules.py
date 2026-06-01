@@ -298,10 +298,17 @@ class TestMockExtractorFraud:
         result = mock_extract("Tài khoản U_FRAUD_002 bị khóa, tôi không thể rút tiền")
         assert result.user_id == "U_FRAUD_002"
 
-    def test_default_fraud_user_id(self):
+    def test_no_default_fraud_user_id(self):
+        """Without user_id or phone/email/wallet_id, user_id must be None.
+
+        The old behavior defaulted to U_FRAUD_001 which is UNSAFE —
+        it would fetch the wrong user's data. Identity resolution now
+        happens in fetch_evidence via phone/email/wallet_id lookup.
+        """
         from fintech_agent.llm.mock_extractor import mock_extract
         result = mock_extract("Tài khoản bị khóa vô cớ, không rút được tiền")
-        assert result.user_id == "U_FRAUD_001"
+        assert result.user_id is None
+        assert "user_id" in result.missing_fields
 
     def test_no_transaction_id_required(self):
         from fintech_agent.llm.mock_extractor import mock_extract

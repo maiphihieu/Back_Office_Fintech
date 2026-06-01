@@ -1,5 +1,15 @@
 """FastAPI application entrypoint."""
 
+import os
+import logging
+
+from dotenv import load_dotenv
+
+# Load .env BEFORE any other imports so all modules see env vars
+load_dotenv()
+
+logger = logging.getLogger(__name__)
+
 from fastapi import FastAPI
 
 from fintech_agent import __version__
@@ -38,6 +48,12 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+# ── Startup diagnostics (safe — never prints actual key) ──
+_has_key = bool(os.getenv("OPENAI_API_KEY"))
+_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+logger.info("[LLM] OPENAI_API_KEY loaded: %s", _has_key)
+logger.info("[LLM] OPENAI_MODEL: %s", _model)
 
 
 if __name__ == "__main__":

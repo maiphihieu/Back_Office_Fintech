@@ -64,12 +64,22 @@ def extract_info(
             selected_workflow = "fraud_account_lock"
 
     # ── Missing fields (use extractor's or compute) ───────────
+    # Workflow-aware: fraud_account_lock does NOT need transaction_id.
+    # It needs identity (user_id, phone, email, or wallet_id) instead.
     missing = list(extracted.missing_fields) if extracted.missing_fields else []
     if not missing:
-        if not extracted.transaction_id:
+        is_fraud_workflow = selected_workflow == "fraud_account_lock"
+        if not extracted.transaction_id and not is_fraud_workflow:
             missing.append("transaction_id")
         if not extracted.user_id:
-            missing.append("user_id")
+            # For fraud, phone/email/wallet_id can resolve user_id later
+            has_identity_hint = (
+                getattr(extracted, "phone", None)
+                or getattr(extracted, "email", None)
+                or getattr(extracted, "wallet_id", None)
+            )
+            if not has_identity_hint:
+                missing.append("user_id")
         if not extracted.service_type:
             missing.append("service_type")
 

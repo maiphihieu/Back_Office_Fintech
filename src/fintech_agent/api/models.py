@@ -67,6 +67,110 @@ class ConflictResponse(BaseModel):
     source_b: str | None = None
 
 
+class ResponseDebugData(BaseModel):
+    """Debug/observability for generated response."""
+    generation_mode: str = "fallback"
+    fallback_reason: str | None = None
+    llm_error: str | None = None
+    model_used: str | None = None
+
+
+class GeneratedResponseData(BaseModel):
+    """LLM-generated case summary for CS/Ops staff."""
+    case_summary: str = ""
+    problem_location: str = ""
+    problem_explanation: str = ""
+    evidence_checked: list[str] = Field(default_factory=list)
+    evidence_supporting_problem_location: list[str] = Field(default_factory=list)
+    problem_location_confidence: str = ""
+    internal_summary: str = ""
+    recommended_next_step: str = ""
+    customer_reply_draft: str = ""
+    safety_notes: list[str] = Field(default_factory=list)
+    debug: ResponseDebugData | None = None
+
+
+class TicketActionData(BaseModel):
+    """Single recommended action within a resolution ticket."""
+    action_id: str = ""
+    action_name: str = ""
+    action_type: str = ""
+    description: str = ""
+    mcp_tool: str | None = None
+    mcp_input: dict | None = None
+    preconditions: list[str] = Field(default_factory=list)
+    evidence_dependencies: list[str] = Field(default_factory=list)
+    requires_approval: bool = False
+    approval_status: str = "not_required"
+    execution_mode: str = "manual"
+    risk_level: str = "unknown"
+    reason: str = ""
+    status: str = "manual_required"
+    expected_result: str = ""
+    safety_notes: list[str] = Field(default_factory=list)
+    staff_instruction: str = ""
+
+
+class AmountVerificationData(BaseModel):
+    """Amount verification metadata for API response."""
+    customer_claimed_amount: int | None = None
+    trusted_amount: int | None = None
+    trusted_amount_source: str | None = None
+    action_amount: int | None = None
+    action_amount_source: str | None = None
+    has_amount_mismatch: bool = False
+    mismatch_description: str = ""
+
+
+class ClaimVerificationData(BaseModel):
+    """Single claim verification result for API response."""
+    claim_id: str = ""
+    claim_type: str = "unknown_claim"
+    raw_text: str = ""
+    customer_claimed_value: str | int | float | None = None
+    normalized_value: str | int | float | None = None
+    unit: str | None = None
+    confidence: float = 0.0
+    verification_status: str = "not_verifiable"
+    trusted_system_value: str | int | float | None = None
+    trusted_source: str | None = None
+    explanation: str = ""
+
+
+class ClaimVerificationSummaryData(BaseModel):
+    """Aggregate claim verification summary for API response."""
+    summary: str = ""
+    claims: list[ClaimVerificationData] = Field(default_factory=list)
+    matched_claims: list[str] = Field(default_factory=list)
+    mismatched_claims: list[str] = Field(default_factory=list)
+    not_verifiable_claims: list[str] = Field(default_factory=list)
+    not_found_claims: list[str] = Field(default_factory=list)
+    has_customer_detail_mismatch: bool = False
+    has_system_evidence_conflict: bool = False
+    staff_explanation: str = ""
+    trusted_data_used_for_action: dict[str, str | int | float | None] = Field(
+        default_factory=dict,
+    )
+
+
+class ResolutionTicketData(BaseModel):
+    """Full resolution ticket for API response."""
+    ticket_id: str = ""
+    ticket_type: str = "unknown"
+    issue_summary: str = ""
+    problem_location: str = "unknown"
+    problem_explanation: str = ""
+    evidence_checked: list[str] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    resolution_status: str = "not_supported"
+    recommended_actions: list[TicketActionData] = Field(default_factory=list)
+    staff_instruction: str = ""
+    customer_reply_draft: str = ""
+    safety_notes: list[str] = Field(default_factory=list)
+    amount_verification: AmountVerificationData | None = None
+    claim_verification: ClaimVerificationSummaryData | None = None
+
+
 class CaseResponse(BaseModel):
     """Standard case response — no raw PII."""
     case_id: str
@@ -84,6 +188,8 @@ class CaseResponse(BaseModel):
     extracted_info: ExtractedInfoResponse | None = None
     evidence: EvidenceBundleResponse | None = None
     draft_output: dict | None = None
+    generated_response: GeneratedResponseData | None = None
+    resolution_ticket: ResolutionTicketData | None = None
     errors: list[str] = Field(default_factory=list)
     next_step: str = ""
     raw_complaint: str | None = None

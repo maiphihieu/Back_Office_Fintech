@@ -2,7 +2,8 @@
 
 Modules:
     source_of_truth_rules  — trust hierarchy (wallet > refund > provider > txn)
-    conflict_rules         — cross-source conflict detection
+    conflict_rules         — cross-source conflict detection (system-vs-system only)
+    claim_verifier         — verify customer claims vs system evidence (non-blocking)
     refund_rules           — refund eligibility checks
     train_ticket_rules     — train ticket workflow decision matrix
     utility_bill_rules     — utility bill workflow decision matrix

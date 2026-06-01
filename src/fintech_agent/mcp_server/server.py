@@ -2,10 +2,11 @@
 
 Server name: fintech-backoffice-mcp-server
 
-Exposes 14 tools:
-  Read-only (8):   get_transaction, get_reconciliation_status, get_wallet_ledger,
+Exposes 17 tools:
+  Read-only (11):  get_transaction, get_reconciliation_status, get_wallet_ledger,
                    get_refund_status, get_train_provider_status, get_utility_bill_status,
-                   get_account_status, get_fraud_case
+                   get_account_status, get_fraud_case,
+                   get_user_by_phone, get_user_by_email, get_user_by_wallet_id
   Draft-only (6):  create_refund_request_draft, create_reconciliation_ticket_draft,
                    create_customer_response_draft, create_force_success_draft,
                    create_unlock_account_draft, create_request_documents_response_draft
@@ -34,6 +35,9 @@ from fintech_agent.mcp_server.handlers import (
     handle_get_refund_status,
     handle_get_train_provider_status,
     handle_get_transaction,
+    handle_get_user_by_email,
+    handle_get_user_by_phone,
+    handle_get_user_by_wallet_id,
     handle_get_utility_bill_status,
     handle_get_wallet_ledger,
 )
@@ -307,6 +311,53 @@ async def get_fraud_case(user_id: str) -> str:
         user_id: The user identifier to look up fraud case for
     """
     result = await handle_get_fraud_case(user_id)
+    return json.dumps(result, ensure_ascii=False, default=str)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Identity resolution tools (Use Case 2 Phase 1) — READ-ONLY
+# ═══════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+async def get_user_by_phone(phone: str) -> str:
+    """Look up a user account by phone number. READ-ONLY.
+
+    Returns account data including user_id, account_status, wallet_id.
+    Used for identity resolution when customer provides phone but not user_id.
+
+    Args:
+        phone: Vietnamese phone number (e.g. 0981000001)
+    """
+    result = await handle_get_user_by_phone(phone)
+    return json.dumps(result, ensure_ascii=False, default=str)
+
+
+@mcp.tool()
+async def get_user_by_email(email: str) -> str:
+    """Look up a user account by email address. READ-ONLY.
+
+    Returns account data including user_id, account_status, wallet_id.
+    Used for identity resolution when customer provides email but not user_id.
+
+    Args:
+        email: Email address to look up
+    """
+    result = await handle_get_user_by_email(email)
+    return json.dumps(result, ensure_ascii=False, default=str)
+
+
+@mcp.tool()
+async def get_user_by_wallet_id(wallet_id: str) -> str:
+    """Look up a user account by wallet ID. READ-ONLY.
+
+    Returns account data including user_id, account_status, wallet_id.
+    Used for identity resolution when customer provides wallet_id but not user_id.
+
+    Args:
+        wallet_id: Wallet identifier (e.g. WALLET_FRAUD_001)
+    """
+    result = await handle_get_user_by_wallet_id(wallet_id)
     return json.dumps(result, ensure_ascii=False, default=str)
 
 

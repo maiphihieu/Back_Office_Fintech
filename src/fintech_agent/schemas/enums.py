@@ -122,6 +122,7 @@ class ActionType(StrEnum):
     CREATE_FORCE_SUCCESS_DRAFT = "create_force_success_draft"
     CREATE_UNLOCK_ACCOUNT_DRAFT = "create_unlock_account_draft"
     CREATE_REQUEST_DOCUMENTS_RESPONSE_DRAFT = "create_request_documents_response_draft"
+    REQUEST_IDENTITY_CORRECTION = "request_identity_correction"
     MANUAL_REVIEW = "manual_review"
     WAIT_SLA = "wait_sla"
     NO_ACTION = "no_action"
@@ -168,3 +169,4 @@ class AuditEventType(StrEnum):
     CASE_REOPENED = "case_reopened"
     LLM_EXTRACTION_FAILED = "llm_extraction_failed"
     SAFETY_BLOCKED = "safety_blocked"
+    RESPONSE_GENERATED = "response_generated"

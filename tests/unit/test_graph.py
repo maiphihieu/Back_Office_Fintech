@@ -36,7 +36,7 @@ class TestGraphCompilation:
         assert app is not None
 
     def test_graph_has_all_nodes(self) -> None:
-        """Verify all 13 expected nodes are registered."""
+        """Verify all 14 expected nodes are registered."""
         graph = build_graph()
         expected_nodes = {
             "case_intake",
@@ -47,6 +47,7 @@ class TestGraphCompilation:
             "route_workflow",
             "apply_rules",
             "recommend_action",
+            "generate_response",
             "approval_gate",
             "create_draft",
             "audit_and_close",
@@ -58,7 +59,7 @@ class TestGraphCompilation:
 
     def test_graph_node_count(self) -> None:
         graph = build_graph()
-        assert len(graph.nodes) == 13
+        assert len(graph.nodes) == 14
 
 
 # ═══════════════════════════════════════════════════════════
@@ -248,12 +249,12 @@ class TestConditionalEdges:
         assert after_detect_conflict({"has_conflict": False}) == "route_workflow"
 
     def test_after_recommend_approval(self) -> None:
-        from fintech_agent.graph.edges import after_recommend_action
-        assert after_recommend_action({"status": CaseStatus.WAITING_APPROVAL}) == "approval_gate"
+        from fintech_agent.graph.edges import after_generate_response
+        assert after_generate_response({"status": CaseStatus.WAITING_APPROVAL}) == "approval_gate"
 
     def test_after_recommend_no_approval(self) -> None:
-        from fintech_agent.graph.edges import after_recommend_action
-        assert after_recommend_action({"status": CaseStatus.DRAFT_CREATED}) == "create_draft"
+        from fintech_agent.graph.edges import after_generate_response
+        assert after_generate_response({"status": CaseStatus.DRAFT_CREATED}) == "create_draft"
 
     def test_after_approval_approved(self) -> None:
         from fintech_agent.graph.edges import after_approval_gate

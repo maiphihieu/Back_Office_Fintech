@@ -6,6 +6,8 @@ Every graph node reads and updates fields on this object.
 
 from __future__ import annotations
 
+from typing import Any
+
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field, field_validator
@@ -19,6 +21,7 @@ from fintech_agent.schemas.enums import (
     ServiceType,
 )
 from fintech_agent.schemas.evidence import EvidenceBundle
+from fintech_agent.schemas.response_generation import GeneratedResponse
 
 
 class ExtractedInfo(BaseModel):
@@ -38,12 +41,27 @@ class ExtractedInfo(BaseModel):
     bill_code: str | None = None
     customer_code: str | None = None
 
+    # --- Identity fields (Phase 1 — fraud/account lock) ---
+    phone: str | None = None
+    email: str | None = None
+    wallet_id: str | None = None
+
     # --- LLM extraction extras (Phase 2) ---
     amount_claimed: int | None = Field(default=None, ge=0)
     language: str | None = None
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     extraction_method: str | None = None  # "mock_regex" | "openai_llm" | "fallback_regex"
     missing_fields: list[str] = Field(default_factory=list)
+
+    # --- Generic claims (Phase 3 — scalable claim framework) ---
+    claims: list[Claim] = Field(
+        default_factory=list,
+        description=(
+            "Generic claims extracted from complaint text. "
+            "Each claim has a claim_type, customer_claimed_value, "
+            "and gets verified against system evidence."
+        ),
+    )
 
 
 class CaseState(BaseModel):
@@ -98,6 +116,9 @@ class CaseState(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
+    # --- LLM generated response ---
+    generated_response: GeneratedResponse | None = None
+
     # --- Error tracking ---
     error_message: str | None = None
 
@@ -114,3 +135,11 @@ class CaseState(BaseModel):
             self.current_state == CaseStatus.CLOSED
             and self.reopen_count < self.max_reopen
         )
+
+
+# ── Deferred model rebuild for forward references ────────────
+# Claim is defined in claim_verification.py. We import it here
+# (after all classes are defined) to resolve the forward reference.
+from fintech_agent.schemas.claim_verification import Claim  # noqa: E402
+
+ExtractedInfo.model_rebuild()

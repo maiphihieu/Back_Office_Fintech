@@ -1,9 +1,8 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import Layout from './components/Layout';
 import DashboardPage from './pages/DashboardPage';
 import CreateCasePage from './pages/CreateCasePage';
 import CaseDetailPage from './pages/CaseDetailPage';
-import DemoPage from './pages/DemoPage';
 import SafetyPage from './pages/SafetyPage';
 
 export default function App() {
@@ -14,7 +13,7 @@ export default function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/create" element={<CreateCasePage />} />
           <Route path="/cases/:caseId" element={<CaseDetailPage />} />
-          <Route path="/demo" element={<DemoPage />} />
+          <Route path="/demo" element={<Navigate to="/create" replace />} />
           <Route path="/safety" element={<SafetyPage />} />
         </Route>
       </Routes>

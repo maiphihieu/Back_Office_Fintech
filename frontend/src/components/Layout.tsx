@@ -9,7 +9,6 @@ export default function Layout() {
   const NAV_ITEMS = [
     { to: '/', icon: '📋', label: t('nav.cases') },
     { to: '/create', icon: '➕', label: t('nav.create') },
-    { to: '/demo', icon: '🎯', label: t('nav.demo') },
     { to: '/safety', icon: '🛡️', label: t('nav.safety') },
   ];
 

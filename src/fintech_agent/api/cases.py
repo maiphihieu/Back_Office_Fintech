@@ -19,12 +19,18 @@ from fintech_agent.api.models import (
     AuditTrailResponse,
     CaseListResponse,
     CaseResponse,
+    ClaimVerificationData,
+    ClaimVerificationSummaryData,
     ConflictResponse,
     CreateCaseRequest,
     ErrorResponse,
     EvidenceBundleResponse,
     ExtractedInfoResponse,
+    GeneratedResponseData,
     RejectRequest,
+    ResolutionTicketData,
+    ResponseDebugData,
+    TicketActionData,
 )
 from fintech_agent.api.service import get_case_service
 from fintech_agent.graph.state import AgentState
@@ -147,6 +153,49 @@ def _state_to_response(state: AgentState) -> CaseResponse:
         except (ValueError, KeyError):
             pass
 
+    # Generated response
+    generated_resp = None
+    gr = state.get("generated_response")
+    if gr is not None:
+        gr_data = gr.model_dump() if hasattr(gr, "model_dump") else gr
+        if isinstance(gr_data, dict):
+            # Filter to only known fields, handle nested debug
+            filtered = {}
+            for k, v in gr_data.items():
+                if k in GeneratedResponseData.model_fields:
+                    if k == "debug" and isinstance(v, dict):
+                        filtered[k] = ResponseDebugData(**v)
+                    else:
+                        filtered[k] = v
+            generated_resp = GeneratedResponseData(**filtered)
+
+    # Resolution ticket
+    ticket_resp = None
+    rt = state.get("resolution_ticket")
+    if rt is not None:
+        rt_data = rt.model_dump() if hasattr(rt, "model_dump") else rt
+        if isinstance(rt_data, dict):
+            # Serialize nested actions
+            actions_raw = rt_data.get("recommended_actions", [])
+            actions_serialized = []
+            for a in actions_raw:
+                if isinstance(a, dict):
+                    act_filtered = {
+                        k: v for k, v in a.items()
+                        if k in TicketActionData.model_fields
+                    }
+                    actions_serialized.append(TicketActionData(**act_filtered))
+                elif hasattr(a, "model_dump"):
+                    actions_serialized.append(
+                        TicketActionData(**a.model_dump())
+                    )
+            rt_filtered = {
+                k: v for k, v in rt_data.items()
+                if k in ResolutionTicketData.model_fields and k != "recommended_actions"
+            }
+            rt_filtered["recommended_actions"] = actions_serialized
+            ticket_resp = ResolutionTicketData(**rt_filtered)
+
     return CaseResponse(
         case_id=state.get("case_id", ""),
         status=status_val,
@@ -163,6 +212,8 @@ def _state_to_response(state: AgentState) -> CaseResponse:
         extracted_info=extracted_info_resp,
         evidence=evidence_resp,
         draft_output=state.get("draft_output"),
+        generated_response=generated_resp,
+        resolution_ticket=ticket_resp,
         errors=state.get("errors", []),
         next_step=next_step,
         raw_complaint=state.get("raw_complaint"),

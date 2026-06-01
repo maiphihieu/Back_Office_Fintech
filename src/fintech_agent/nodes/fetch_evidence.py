@@ -223,20 +223,122 @@ def _fetch_fraud_evidence(
 ) -> AgentState:
     """Fetch account status and fraud case for fraud_account_lock workflow.
 
-    This workflow does NOT need transaction_id, wallet_ledger, provider,
-    refund, or reconciliation. It only needs account + fraud_case.
+    Identity resolution priority:
+    1. Explicit user_id (from complaint text or pre-supplied)
+    2. Phone number lookup (via get_user_by_phone MCP tool)
+    3. Email lookup (via get_user_by_email MCP tool)
+    4. Wallet_id lookup (via get_user_by_wallet_id MCP tool)
+
+    If identity cannot be resolved, returns evidence with missing_identity
+    marker. The rule engine will then route to manual_review.
+
+    SAFETY: Does NOT default to U_FRAUD_001 or any other hardcoded user_id.
     """
     user_id = (
         (extracted.user_id if extracted else None)
         or state.get("user_id")
-        or "U_FRAUD_001"
     )
     tool_results: dict = {}
+    identity_source: str | None = None
+
+    # ── Identity resolution via phone/email/wallet_id ─────────
+    if not user_id and extracted:
+        # Try phone lookup
+        phone = getattr(extracted, "phone", None)
+        if phone:
+            try:
+                result = mcp.call_tool_sync("get_user_by_phone", {"phone": phone})
+                if "error" not in result:
+                    user_id = result.get("user_id")
+                    identity_source = f"phone:{phone}"
+                    tool_results["identity_lookup"] = "ok_phone"
+                    _log_tool(audit, case_id, "get_user_by_phone", True,
+                              f"resolved={user_id}", audit_ids, corr_id)
+                else:
+                    tool_results["identity_lookup_phone"] = "not_found"
+                    _log_tool(audit, case_id, "get_user_by_phone", False,
+                              result["error"], audit_ids, corr_id)
+            except Exception as e:
+                tool_results["identity_lookup_phone"] = "failed"
+                _log_tool(audit, case_id, "get_user_by_phone", False,
+                          str(e), audit_ids, corr_id)
+
+        # Try email lookup
+        if not user_id:
+            email = getattr(extracted, "email", None)
+            if email:
+                try:
+                    result = mcp.call_tool_sync("get_user_by_email", {"email": email})
+                    if "error" not in result:
+                        user_id = result.get("user_id")
+                        identity_source = f"email:{email}"
+                        tool_results["identity_lookup"] = "ok_email"
+                        _log_tool(audit, case_id, "get_user_by_email", True,
+                                  f"resolved={user_id}", audit_ids, corr_id)
+                    else:
+                        tool_results["identity_lookup_email"] = "not_found"
+                        _log_tool(audit, case_id, "get_user_by_email", False,
+                                  result["error"], audit_ids, corr_id)
+                except Exception as e:
+                    tool_results["identity_lookup_email"] = "failed"
+                    _log_tool(audit, case_id, "get_user_by_email", False,
+                              str(e), audit_ids, corr_id)
+
+        # Try wallet_id lookup
+        if not user_id:
+            wallet_id = getattr(extracted, "wallet_id", None)
+            if wallet_id:
+                try:
+                    result = mcp.call_tool_sync("get_user_by_wallet_id",
+                                                {"wallet_id": wallet_id})
+                    if "error" not in result:
+                        user_id = result.get("user_id")
+                        identity_source = f"wallet_id:{wallet_id}"
+                        tool_results["identity_lookup"] = "ok_wallet_id"
+                        _log_tool(audit, case_id, "get_user_by_wallet_id", True,
+                                  f"resolved={user_id}", audit_ids, corr_id)
+                    else:
+                        tool_results["identity_lookup_wallet_id"] = "not_found"
+                        _log_tool(audit, case_id, "get_user_by_wallet_id", False,
+                                  result["error"], audit_ids, corr_id)
+                except Exception as e:
+                    tool_results["identity_lookup_wallet_id"] = "failed"
+                    _log_tool(audit, case_id, "get_user_by_wallet_id", False,
+                              str(e), audit_ids, corr_id)
+
+    # ── Identity not resolved — cannot proceed safely ─────────
+    if not user_id:
+        errors.append("identity_not_resolved: no user_id, phone, email, or wallet_id")
+        tool_results["identity_lookup"] = "missing"
+
+        if audit:
+            ev = audit.log_event(
+                case_id, AuditEventType.EVIDENCE_FETCH_STARTED,
+                details={"user_id": None, "workflow": "fraud_account_lock",
+                         "identity_status": "missing"},
+                correlation_id=corr_id,
+            )
+            audit_ids.append(ev.event_id)
+
+        # Return empty evidence — rule engine will route to manual_review
+        return {
+            "evidence_bundle": EvidenceBundle(),
+            "tool_results": tool_results,
+            "selected_workflow": "fraud_account_lock",
+            "errors": errors,
+            "status": CaseStatus.FETCHING_EVIDENCE,
+            "audit_event_ids": audit_ids,
+        }
+
+    # ── Identity resolved — fetch evidence ────────────────────
+    if identity_source:
+        tool_results["identity_source"] = identity_source
 
     if audit:
         ev = audit.log_event(
             case_id, AuditEventType.EVIDENCE_FETCH_STARTED,
-            details={"user_id": user_id, "workflow": "fraud_account_lock"},
+            details={"user_id": user_id, "workflow": "fraud_account_lock",
+                     "identity_source": identity_source or "direct"},
             correlation_id=corr_id,
         )
         audit_ids.append(ev.event_id)
@@ -277,6 +379,7 @@ def _fetch_fraud_evidence(
     return {
         "evidence_bundle": evidence,
         "tool_results": tool_results,
+        "user_id": user_id,
         "selected_workflow": "fraud_account_lock",
         "errors": errors,
         "status": CaseStatus.FETCHING_EVIDENCE,

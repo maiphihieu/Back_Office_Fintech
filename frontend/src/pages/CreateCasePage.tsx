@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { casesApi } from '../api/cases';
 import type { CaseResponse } from '../api/types';
 import { ActionBadge, RiskBadge, StatusBadge, ConflictBadge } from '../components/StatusBadge';
+import AIResponsePanel from '../components/AIResponsePanel';
 import { formatCurrency } from '../lib/format';
 import { useI18n } from '../lib/i18n';
 import { casesToHistoryItems, getServiceIcon, type CaseHistoryItem } from '../lib/historyStore';
@@ -23,6 +24,7 @@ const CHIP_COMPLAINTS: Record<string, string> = {
   chip_provider: 'Tôi thanh toán tiền nước TXN_BILL_003 nhưng bị lỗi. Tiền đã bị trừ 310,000 VND nhưng hóa đơn chưa được thanh toán.',
   chip_topup: 'Tôi nạp tiền từ ngân hàng vào ví, tài khoản ngân hàng đã trừ tiền nhưng ví vẫn báo 0 đồng. Mã giao dịch TXN_TOPUP_001',
   chip_conflict: 'Giao dịch TXN_CONFLICT_001 mua vé tàu bị lỗi. Ví đã trừ tiền nhưng hệ thống hiện đang pending.',
+  chip_fraud: 'Tài khoản của tôi bất ngờ bị khóa vô cớ, tôi không thể rút tiền. Số điện thoại 0981000001',
 };
 
 export default function CreateCasePage() {
@@ -331,7 +333,7 @@ export default function CreateCasePage() {
         {/* Quick scenario chips */}
         {messages.length === 0 && !isViewingHistory && (
           <div className="chip-bar">
-            {(['chip_train', 'chip_bill', 'chip_provider', 'chip_topup', 'chip_conflict'] as const).map(chip => (
+            {(['chip_train', 'chip_bill', 'chip_provider', 'chip_topup', 'chip_conflict', 'chip_fraud'] as const).map(chip => (
               <button
                 key={chip}
                 className="scenario-chip"
@@ -392,6 +394,9 @@ export default function CreateCasePage() {
               <div className="panel-row"><span>Amount</span><span>{lastResult.extracted_info.amount_claimed != null ? formatCurrency(lastResult.extracted_info.amount_claimed) : '—'}</span></div>
               {lastResult.extracted_info.bill_code && <div className="panel-row"><span>Bill Code</span><span className="mono">{lastResult.extracted_info.bill_code}</span></div>}
               {lastResult.extracted_info.order_id && <div className="panel-row"><span>Order ID</span><span className="mono">{lastResult.extracted_info.order_id}</span></div>}
+              {lastResult.extracted_info.phone && <div className="panel-row"><span>📞 Phone</span><span className="mono">{lastResult.extracted_info.phone}</span></div>}
+              {lastResult.extracted_info.email && <div className="panel-row"><span>📧 Email</span><span className="mono">{lastResult.extracted_info.email}</span></div>}
+              {lastResult.extracted_info.wallet_id && <div className="panel-row"><span>💳 Wallet ID</span><span className="mono">{lastResult.extracted_info.wallet_id}</span></div>}
             </div>
           ) : null}
         </div>
@@ -400,7 +405,7 @@ export default function CreateCasePage() {
         <div className="panel-card">
           <h4 className="panel-title">⚙️ {t('create.panel_workflow')}</h4>
           <div className="panel-list">
-            {(['train_ticket', 'utility_bill', 'wallet_topup', 'train_ticket_reconciliation', 'utility_bill_reconciliation'] as const).map(wf => (
+            {(['train_ticket', 'utility_bill', 'wallet_topup', 'fraud_account_lock', 'train_ticket_reconciliation', 'utility_bill_reconciliation'] as const).map(wf => (
               <div key={wf} className={`workflow-item ${lastResult?.selected_workflow === wf ? 'active' : ''}`}>
                 <span className="workflow-dot" />
                 {t(`workflow.${wf}`)}
@@ -461,6 +466,7 @@ function ResultCard({ result, t, navigate, onNewCase }: {
   const hasDataNotFound = errors.some(e => e.includes('Data not found'));
   const hasMaxRetries = errors.some(e => e.includes('max retries exceeded'));
   const hasCriticalMissing = errors.some(e => e.includes('critical: transaction_id missing'));
+  const hasCriticalIdentity = errors.some(e => e.includes('critical: identity_missing'));
   const hasNoExtraction = !ei?.transaction_id && !ei?.user_id && !ei?.service_type;
   const hasErrors = errors.length > 0;
 
@@ -482,7 +488,12 @@ function ResultCard({ result, t, navigate, onNewCase }: {
             <span className="alert-icon">🔍</span>{t('create.alert_no_txn')}
           </div>
         )}
-        {hasNoExtraction && !hasCriticalMissing && (
+        {hasCriticalIdentity && !hasCriticalMissing && (
+          <div className="alert alert-warning" style={{ margin: '10px 0', fontSize: '0.8rem' }}>
+            <span className="alert-icon">🔐</span>{t('create.alert_no_identity')}
+          </div>
+        )}
+        {hasNoExtraction && !hasCriticalMissing && !hasCriticalIdentity && (
           <div className="alert alert-warning" style={{ margin: '10px 0', fontSize: '0.8rem' }}>
             <span className="alert-icon">📝</span>{t('create.alert_no_extract')}
           </div>
@@ -558,6 +569,15 @@ function ResultCard({ result, t, navigate, onNewCase }: {
             {ei.amount_claimed != null && (
               <div className="result-row"><span className="result-label">Amount</span><span className="result-value" style={{ color: 'var(--amber)' }}>{formatCurrency(ei.amount_claimed)}</span></div>
             )}
+            {ei.phone && (
+              <div className="result-row"><span className="result-label">📞 Phone</span><span className="result-value mono">{ei.phone}</span></div>
+            )}
+            {ei.email && (
+              <div className="result-row"><span className="result-label">📧 Email</span><span className="result-value mono">{ei.email}</span></div>
+            )}
+            {ei.wallet_id && (
+              <div className="result-row"><span className="result-label">💳 Wallet ID</span><span className="result-value mono">{ei.wallet_id}</span></div>
+            )}
           </div>
         )}
 
@@ -570,6 +590,9 @@ function ResultCard({ result, t, navigate, onNewCase }: {
             </ul>
           </details>
         )}
+
+        {/* AI Response Panel */}
+        <AIResponsePanel response={result.generated_response} />
 
         {/* Action buttons */}
         <div className="result-actions">

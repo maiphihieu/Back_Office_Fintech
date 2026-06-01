@@ -14,8 +14,11 @@ from typing_extensions import TypedDict
 from fintech_agent.schemas.actions import RecommendedAction
 from fintech_agent.schemas.approval import ApprovalDecision, ApprovalPacket
 from fintech_agent.schemas.case_state import ExtractedInfo
+from fintech_agent.schemas.claim_verification import ClaimVerificationSummary
 from fintech_agent.schemas.enums import ApprovalStatus, CaseStatus
 from fintech_agent.schemas.evidence import EvidenceBundle, EvidenceConflict
+from fintech_agent.schemas.resolution_ticket import ResolutionTicket
+from fintech_agent.schemas.response_generation import GeneratedResponse
 
 
 class AgentState(TypedDict, total=False):
@@ -46,6 +49,9 @@ class AgentState(TypedDict, total=False):
     conflicts: list[EvidenceConflict]
     has_conflict: bool
 
+    # ── Claim verification (non-blocking) ────────────────────
+    claim_verification_summary: ClaimVerificationSummary | None
+
     # ── Rule decision ────────────────────────────────────────
     rule_decision: dict[str, Any] | None  # TrainDecision / UtilityDecision serialized
     recommended_action: RecommendedAction | None
@@ -58,6 +64,12 @@ class AgentState(TypedDict, total=False):
 
     # ── Draft output ─────────────────────────────────────────
     draft_output: dict[str, Any] | None  # serialized draft (refund/reconciliation/response)
+
+    # ── LLM generated response ───────────────────────────────
+    generated_response: GeneratedResponse | None
+
+    # ── Resolution ticket (deterministic) ────────────────────────
+    resolution_ticket: ResolutionTicket | None
 
     # ── Lifecycle ────────────────────────────────────────────
     status: CaseStatus

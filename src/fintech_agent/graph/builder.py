@@ -29,8 +29,8 @@ from fintech_agent.graph.edges import (
     after_detect_conflict,
     after_extract_info,
     after_fetch_evidence,
+    after_generate_response,
     after_missing_info,
-    after_recommend_action,
     after_retry,
     after_route_workflow,
 )
@@ -42,6 +42,7 @@ from fintech_agent.nodes.conflict_detection import detect_conflict
 from fintech_agent.nodes.draft_action import create_draft
 from fintech_agent.nodes.extract_info import extract_info
 from fintech_agent.nodes.fetch_evidence import fetch_evidence
+from fintech_agent.nodes.generate_response import generate_response
 from fintech_agent.nodes.manual_review import manual_review
 from fintech_agent.nodes.missing_info import missing_info_handler
 from fintech_agent.nodes.recommendation import recommend_action
@@ -71,6 +72,7 @@ def build_graph(audit: AuditLogger | None = None) -> StateGraph:
     graph.add_node("route_workflow", partial(route_workflow, audit=audit))
     graph.add_node("apply_rules", partial(apply_rules, audit=audit))
     graph.add_node("recommend_action", partial(recommend_action, audit=audit))
+    graph.add_node("generate_response", partial(generate_response, audit=audit))
     graph.add_node("approval_gate", partial(approval_gate, audit=audit))
     graph.add_node("create_draft", partial(create_draft, audit=audit))
     graph.add_node("audit_and_close", partial(audit_and_close, audit=audit))
@@ -87,7 +89,8 @@ def build_graph(audit: AuditLogger | None = None) -> StateGraph:
     graph.add_conditional_edges("detect_conflict", after_detect_conflict)
     graph.add_conditional_edges("route_workflow", after_route_workflow)
     graph.add_edge("apply_rules", "recommend_action")
-    graph.add_conditional_edges("recommend_action", after_recommend_action)
+    graph.add_edge("recommend_action", "generate_response")
+    graph.add_conditional_edges("generate_response", after_generate_response)
     graph.add_conditional_edges("approval_gate", after_approval_gate)
     graph.add_edge("create_draft", "audit_and_close")
     graph.add_edge("manual_review", "audit_and_close")

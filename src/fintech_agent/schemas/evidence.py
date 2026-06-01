@@ -189,6 +189,14 @@ class EvidenceConflict(BaseModel):
     value_a: str
     value_b: str
     description: str
+    conflict_type: str | None = Field(
+        default=None,
+        description="Loại conflict: 'data_inconsistency' | 'amount_mismatch' | 'ownership' | etc.",
+    )
+    severity: str = Field(
+        default="high",
+        description="'low' | 'medium' | 'high'",
+    )
 
 
 # ─── Evidence Bundle ────────────────────────────────────────

@@ -408,3 +408,63 @@ async def handle_create_request_documents_response_draft(
         note="Draft only. Account remains locked pending document review.",
     ).to_dict()
 
+
+# ═══════════════════════════════════════════════════════════════
+#  Identity resolution handlers (Use Case 2 Phase 1)
+# ═══════════════════════════════════════════════════════════════
+
+
+async def handle_get_user_by_phone(phone: str) -> dict:
+    """Look up account by phone number. READ-ONLY.
+
+    Returns the account record (with user_id) or error if not found.
+    Used for identity resolution when customer provides phone but not user_id.
+    """
+    try:
+        from fintech_agent.database.repository_factory import get_account_repo
+        repo = get_account_repo()
+        account = repo.get_by_phone(phone)
+        if account is None:
+            return {"error": f"No account found for phone: {phone}"}
+        return account.model_dump(mode="json")
+    except Exception as e:
+        _logger.exception("handle_get_user_by_phone failed for %s", phone)
+        return {"error": str(e)}
+
+
+async def handle_get_user_by_email(email: str) -> dict:
+    """Look up account by email address. READ-ONLY.
+
+    Returns the account record (with user_id) or error if not found.
+    Used for identity resolution when customer provides email but not user_id.
+    """
+    try:
+        from fintech_agent.database.repository_factory import get_account_repo
+        repo = get_account_repo()
+        account = repo.get_by_email(email)
+        if account is None:
+            return {"error": f"No account found for email: {email}"}
+        return account.model_dump(mode="json")
+    except Exception as e:
+        _logger.exception("handle_get_user_by_email failed for %s", email)
+        return {"error": str(e)}
+
+
+async def handle_get_user_by_wallet_id(wallet_id: str) -> dict:
+    """Look up account by wallet_id. READ-ONLY.
+
+    Returns the account record (with user_id) or error if not found.
+    Used for identity resolution when customer provides wallet_id but not user_id.
+    """
+    try:
+        from fintech_agent.database.repository_factory import get_account_repo
+        repo = get_account_repo()
+        account = repo.get_by_wallet_id(wallet_id)
+        if account is None:
+            return {"error": f"No account found for wallet_id: {wallet_id}"}
+        return account.model_dump(mode="json")
+    except Exception as e:
+        _logger.exception("handle_get_user_by_wallet_id failed for %s", wallet_id)
+        return {"error": str(e)}
+
+

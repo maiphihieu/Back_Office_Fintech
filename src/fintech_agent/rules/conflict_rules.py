@@ -21,7 +21,14 @@ def detect_all_conflicts(
     evidence: EvidenceBundle,
     case_user_id: str | None = None,
 ) -> list[EvidenceConflict]:
-    """Run all conflict checks and return a list of detected conflicts.
+    """Run all system-vs-system conflict checks.
+
+    NOTE: Customer-vs-system mismatches (e.g. claimed amount != system amount)
+    are NO LONGER detected here. They are handled by claim_verifier.py which
+    produces non-blocking ClaimVerification results.
+
+    This function only detects conflicts between TRUSTED system sources,
+    which are blocking and route to manual_review.
 
     Args:
         evidence: The collected evidence bundle.
@@ -159,3 +166,10 @@ def _check_user_ownership(
             )
         ]
     return []
+
+
+# NOTE: _check_amount_mismatch has been removed.
+# Customer-vs-system amount mismatches are now handled by
+# fintech_agent.rules.claim_verifier.verify_all_claims()
+# which produces non-blocking ClaimVerification results.
+# Only system-vs-system conflicts remain in this module.
