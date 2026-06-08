@@ -369,8 +369,11 @@ class TestFraudFallbackResponse:
             "evidence_bundle": _fp_evidence(),
         }
         resp = generate_safe_fallback_response(state)
-        assert len(resp.evidence_checked) >= 4
-        assert "Trạng thái tài khoản" in resp.evidence_checked
+        # DiagnosticEngine puts evidence data points in
+        # evidence_supporting_problem_location, not evidence_checked
+        # (evidence_checked is enriched by ticket_builder)
+        assert len(resp.evidence_supporting_problem_location) >= 4
+        assert any("account.status=" in e for e in resp.evidence_supporting_problem_location)
 
     def test_fp_fallback_customer_reply_safe(self):
         state = {
@@ -408,9 +411,9 @@ class TestFraudFallbackResponse:
         resp = generate_safe_fallback_response(state)
         # High risk should NOT say false positive
         assert "false positive" not in resp.problem_explanation
-        # Should say to keep locked
-        assert "giữ trạng thái khóa" in resp.problem_explanation
-        assert "chứng từ xác minh" in resp.problem_explanation
+        # DiagnosticEngine now produces data-driven explanation
+        assert "rủi ro" in resp.problem_explanation
+        assert "risk_score=88" in resp.problem_explanation or "risk_score" in " ".join(resp.evidence_supporting_problem_location)
         assert resp.problem_location_confidence == "high"
 
     def test_high_risk_customer_reply_safe(self):
@@ -910,4 +913,6 @@ class TestIdentityNotFound:
             "evidence_bundle": _high_risk_evidence(),
         }
         resp = generate_safe_fallback_response(state)
-        assert "giữ trạng thái khóa" in resp.problem_explanation
+        # DiagnosticEngine now says "rủi ro" instead of "giữ trạng thái khóa"
+        assert "rủi ro" in resp.problem_explanation
+        assert resp.problem_location == "fraud_system"

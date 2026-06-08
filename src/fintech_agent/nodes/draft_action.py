@@ -114,6 +114,11 @@ def create_draft(state: AgentState, audit: AuditLogger | None = None) -> AgentSt
                     get_customer_message as get_fraud_customer_message,
                 )
                 message = get_fraud_customer_message(action.diagnosis)
+            elif workflow == "merchant_settlement_delay":
+                from fintech_agent.messages.merchant_settlement_messages import (
+                    get_merchant_message,
+                )
+                message = get_merchant_message(action.diagnosis)
             else:
                 message = f"Kết quả kiểm tra: {action.diagnosis}"
             result = mcp.call_tool_sync("create_customer_response_draft", {
@@ -262,6 +267,19 @@ def create_draft(state: AgentState, audit: AuditLogger | None = None) -> AgentSt
                 "audit_event_ids": audit_ids,
             }
 
+        # ── Merchant settlement draft actions ────────────────
+        elif action.action_type == ActionType.CREATE_MANUAL_PAYOUT_DRAFT:
+            return _draft_manual_payout(state, action, evidence, case_id, audit, audit_ids)
+
+        elif action.action_type == ActionType.SEND_UNC_EMAIL_DRAFT:
+            return _draft_unc_email(state, action, evidence, case_id, audit, audit_ids)
+
+        elif action.action_type == ActionType.REQUEST_BANK_ACCOUNT_CORRECTION:
+            return _draft_bank_account_correction(state, action, evidence, case_id, audit, audit_ids)
+
+        elif action.action_type == ActionType.MANUAL_SETTLEMENT_REVIEW:
+            return _draft_manual_settlement_review(state, action, evidence, case_id, audit, audit_ids)
+
         elif action.action_type == ActionType.NO_ACTION:
             if audit:
                 ev = audit.log_event(
@@ -301,3 +319,166 @@ def create_draft(state: AgentState, audit: AuditLogger | None = None) -> AgentSt
             "status": CaseStatus.MANUAL_REVIEW,
             "audit_event_ids": audit_ids,
         }
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Merchant settlement draft helpers (Case 3)
+#  All produce draft-only outputs — no real payout/email/bank update.
+# ═══════════════════════════════════════════════════════════════
+
+
+def _draft_manual_payout(state, action, evidence, case_id, audit, audit_ids):
+    """Create a manual payout draft. Amount from settlement ledger only."""
+    from fintech_agent.messages.merchant_settlement_messages import get_cs_message as get_ms_cs
+    ledger = evidence.merchant_settlement_ledger if evidence else None
+    merchant = evidence.merchant_profile if evidence else None
+    bank_acct = evidence.merchant_bank_account if evidence else None
+    payout = evidence.merchant_payout if evidence else None
+
+    amount = ledger.net_settlement_amount if ledger else 0
+    merchant_id = merchant.merchant_id if merchant else "UNKNOWN"
+    settlement_date = ledger.settlement_date if ledger else None
+    bank_account_id = bank_acct.bank_account_id if bank_acct else None
+
+    # Check duplicate payout risk
+    dup_risk = False
+    if payout and payout.status in ("processing", "pending", "success", "completed"):
+        dup_risk = True
+
+    rule_details = getattr(action, "details", None) or {}
+
+    draft_output = {
+        "type": "manual_payout_draft",
+        "merchant_id": merchant_id,
+        "settlement_date": settlement_date,
+        "amount": amount,
+        "currency": "VND",
+        "bank_account_id": bank_account_id,
+        "reason": get_ms_cs(ActionType.CREATE_MANUAL_PAYOUT_DRAFT, action.diagnosis),
+        "trusted_amount_source": "settlement_ledger.net_settlement_amount",
+        "approval_required": True,
+        "execution_mode": "draft_only",
+        "duplicate_payout_risk": dup_risk or rule_details.get("duplicate_payout_risk", False),
+        "status": "pending_approval",
+        "safety_notes": [
+            "Không tự động thực hiện payout",
+            "Số tiền lấy từ settlement_ledger, không từ merchant",
+            "Cần phê duyệt trước khi thực hiện",
+            "Kiểm tra bank account verified trước khi duyệt",
+        ],
+    }
+
+    if audit:
+        ev = audit.log_event(
+            case_id, AuditEventType.DRAFT_CREATED,
+            details={
+                "draft_type": "manual_payout_draft",
+                "amount": amount,
+                "merchant_id": merchant_id,
+                "duplicate_payout_risk": dup_risk,
+            },
+        )
+        audit_ids.append(ev.event_id)
+
+    return {
+        "draft_output": draft_output,
+        "approval_required": True,
+        "status": CaseStatus.DRAFT_CREATED,
+        "audit_event_ids": audit_ids,
+    }
+
+
+def _draft_unc_email(state, action, evidence, case_id, audit, audit_ids):
+    """Create a UNC email draft. Does not send real email."""
+    from fintech_agent.messages.merchant_settlement_messages import get_cs_message as get_ms_cs
+    merchant = evidence.merchant_profile if evidence else None
+    payout = evidence.merchant_payout if evidence else None
+    receipt = evidence.bank_transfer_receipt if evidence else None
+
+    draft_output = {
+        "type": "unc_email_draft",
+        "merchant_id": merchant.merchant_id if merchant else "UNKNOWN",
+        "payout_id": payout.payout_id if payout else None,
+        "unc_number": receipt.unc_number if receipt else None,
+        "receipt_url": receipt.receipt_url if receipt else None,
+        "merchant_email": merchant.contact_email if merchant else None,
+        "reason": get_ms_cs(ActionType.SEND_UNC_EMAIL_DRAFT, action.diagnosis),
+        "execution_mode": "draft_only",
+        "status": "pending_approval",
+    }
+
+    if audit:
+        ev = audit.log_event(
+            case_id, AuditEventType.DRAFT_CREATED,
+            details={"draft_type": "unc_email_draft"},
+        )
+        audit_ids.append(ev.event_id)
+
+    return {
+        "draft_output": draft_output,
+        "approval_required": True,
+        "status": CaseStatus.DRAFT_CREATED,
+        "audit_event_ids": audit_ids,
+    }
+
+
+def _draft_bank_account_correction(state, action, evidence, case_id, audit, audit_ids):
+    """Create a bank account correction draft. Does not update bank account."""
+    from fintech_agent.messages.merchant_settlement_messages import (
+        get_cs_message as get_ms_cs,
+        get_merchant_message,
+    )
+    merchant = evidence.merchant_profile if evidence else None
+    bank_acct = evidence.merchant_bank_account if evidence else None
+
+    draft_output = {
+        "type": "bank_account_correction_draft",
+        "merchant_id": merchant.merchant_id if merchant else "UNKNOWN",
+        "bank_account_id": bank_acct.bank_account_id if bank_acct else None,
+        "correction_reason": action.diagnosis,
+        "cs_message": get_ms_cs(ActionType.REQUEST_BANK_ACCOUNT_CORRECTION, action.diagnosis),
+        "merchant_message": get_merchant_message(action.diagnosis),
+        "execution_mode": "draft_only",
+        "status": "created",
+    }
+
+    if audit:
+        ev = audit.log_event(
+            case_id, AuditEventType.DRAFT_CREATED,
+            details={"draft_type": "bank_account_correction_draft"},
+        )
+        audit_ids.append(ev.event_id)
+
+    return {
+        "draft_output": draft_output,
+        "status": CaseStatus.DRAFT_CREATED,
+        "audit_event_ids": audit_ids,
+    }
+
+
+def _draft_manual_settlement_review(state, action, evidence, case_id, audit, audit_ids):
+    """Create manual settlement review output."""
+    from fintech_agent.messages.merchant_settlement_messages import get_cs_message as get_ms_cs
+    merchant = evidence.merchant_profile if evidence else None
+
+    draft_output = {
+        "type": "manual_settlement_review",
+        "merchant_id": merchant.merchant_id if merchant else "UNKNOWN",
+        "cs_message": get_ms_cs(ActionType.MANUAL_SETTLEMENT_REVIEW, action.diagnosis),
+        "diagnosis": action.diagnosis,
+        "status": "pending",
+    }
+
+    if audit:
+        ev = audit.log_event(
+            case_id, AuditEventType.DRAFT_CREATED,
+            details={"draft_type": "manual_settlement_review", "diagnosis": action.diagnosis},
+        )
+        audit_ids.append(ev.event_id)
+
+    return {
+        "draft_output": draft_output,
+        "status": CaseStatus.MANUAL_REVIEW,
+        "audit_event_ids": audit_ids,
+    }
+

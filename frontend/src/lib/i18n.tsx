@@ -12,6 +12,7 @@ const translations: Record<Lang, Record<string, string>> = {
     /* ── Layout / Nav ── */
     'nav.brand_subtitle': 'Hệ thống xử lý khiếu nại',
     'nav.cases': 'Danh sách Case',
+    'nav.chat_tickets': 'Customer Chat Tickets',
     'nav.create': 'Tạo Case mới',
     'nav.safety': 'Kiểm tra An toàn',
     'nav.lang_toggle': '🌐 English',
@@ -49,6 +50,10 @@ const translations: Record<Lang, Record<string, string>> = {
     'action.create_force_success_draft': 'Tạo draft Force Success',
     'action.create_unlock_account_draft': 'Tạo draft mở khóa tài khoản',
     'action.create_request_documents_response_draft': 'Yêu cầu bổ sung giấy tờ',
+    'action.create_manual_payout_draft': 'Tạo draft giải ngân thủ công',
+    'action.send_unc_email_draft': 'Gửi UNC/biên lai cho Merchant',
+    'action.request_bank_account_correction': 'Yêu cầu cập nhật tài khoản NH',
+    'action.manual_settlement_review': 'Settlement review thủ công',
     'action.manual_review': 'Xử lý thủ công',
     'action.no_action': 'Không cần xử lý',
     'action.wait_sla': 'Chờ SLA',
@@ -64,6 +69,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'workflow.fraud_account_lock': 'Kiểm tra khóa tài khoản do fraud',
     'workflow.train_ticket_reconciliation': 'Đối soát vé tàu',
     'workflow.utility_bill_reconciliation': 'Đối soát hóa đơn',
+    'workflow.merchant_settlement_delay': 'Giải ngân Merchant',
 
     /* ── Service Type ── */
     'service.train_ticket': 'Vé tàu',
@@ -71,6 +77,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'service.water_bill': 'Hóa đơn nước',
     'service.wallet_topup': 'Nạp tiền ví',
     'service.account_security': 'Bảo mật tài khoản',
+    'service.merchant_settlement': 'Thanh toán Merchant',
 
     /* ── Issue Type ── */
     'issue.payment_no_delivery': 'Đã thanh toán nhưng chưa nhận',
@@ -80,6 +87,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'issue.provider_not_confirmed': 'NCC chưa xác nhận',
     'issue.topup_pending': 'Nạp tiền pending',
     'issue.account_locked': 'Tài khoản bị khóa',
+    'issue.settlement_delay': 'Chậm giải ngân settlement',
 
     /* ── Approval Status ── */
     'approval.pending': 'Đang chờ',
@@ -126,6 +134,35 @@ const translations: Record<Lang, Record<string, string>> = {
     'evidence.trigger_reason': 'Lý do kích hoạt',
     'evidence.signals': 'Tín hiệu',
     'evidence.recommended_decision': 'Đề xuất quyết định',
+    /* ── Merchant settlement evidence keys ── */
+    'evidence.merchant_id': 'Mã merchant',
+    'evidence.merchant_name': 'Tên merchant',
+    'evidence.tax_code': 'Mã số thuế',
+    'evidence.settlement_cycle': 'Chu kỳ thanh toán',
+    'evidence.settlement_date': 'Ngày settlement',
+    'evidence.due_date': 'Ngày đáo hạn',
+    'evidence.gross_amount': 'Tổng doanh thu',
+    'evidence.fee_amount': 'Phí dịch vụ',
+    'evidence.chargeback_amount': 'Tiền chargeback',
+    'evidence.net_settlement_amount': 'Số tiền ròng cần giải ngân',
+    'evidence.currency': 'Đơn vị tiền tệ',
+    'evidence.bank_name': 'Ngân hàng',
+    'evidence.account_number': 'Số tài khoản',
+    'evidence.account_holder': 'Chủ tài khoản',
+    'evidence.verification_status': 'Trạng thái xác minh',
+    'evidence.is_active': 'Tài khoản còn hoạt động',
+    'evidence.batch_id': 'Mã batch',
+    'evidence.payout_id': 'Mã payout',
+    'evidence.payout_amount': 'Số tiền payout',
+    'evidence.failure_reason': 'Lý do lỗi',
+    'evidence.receipt_id': 'Mã biên lai',
+    'evidence.unc_number': 'Số UNC',
+    'evidence.sent_to_merchant': 'Đã gửi cho merchant',
+    'evidence.receipt_url': 'Link biên lai',
+    'evidence.contact_email': 'Email liên hệ',
+    'evidence.contact_phone': 'SĐT liên hệ',
+    'evidence.bank_account_id': 'Mã tài khoản NH',
+    'evidence.ledger_id': 'Mã ledger',
 
     /* ── Audit Events ── */
     'audit.case_created': 'Tạo case',
@@ -186,6 +223,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'create.chip_topup': 'Nạp tiền ví — bank trừ, ví 0đ',
     'create.chip_conflict': 'Conflict cần manual review',
     'create.chip_fraud': 'Tài khoản bị khóa do fraud',
+    'create.chip_merchant': 'Merchant chưa nhận tiền giải ngân',
     'create.advanced_title': 'Thông tin bổ sung nếu có',
     'create.user_id_label': 'Mã người dùng',
     'create.user_id_placeholder': 'VD: U001',
@@ -206,6 +244,10 @@ const translations: Record<Lang, Record<string, string>> = {
     'create.source_wallet': 'Wallet ledger → trạng thái tiền',
     'create.source_provider': 'Provider status → dịch vụ đã cấp chưa',
     'create.source_refund': 'Refund table → vòng đời refund',
+    'create.source_settlement': 'Settlement ledger → số tiền chuẩn',
+    'create.source_payout': 'Payout record → trạng thái giải ngân',
+    'create.source_bank_account': 'Bank account config → tài khoản nhận tiền',
+    'create.source_unc': 'Bank transfer receipt / UNC → chứng từ ngân hàng',
     'create.result_title': 'Kết quả phân tích',
     'create.result_workflow': 'Workflow đã chọn',
     'create.result_action': 'Hành động đề xuất',
@@ -225,6 +267,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'create.alert_evidence_fail': 'Không thể thu thập bằng chứng sau nhiều lần thử. Case được đóng tự động — vui lòng kiểm tra mã giao dịch và thử lại.',
     'create.alert_no_txn': 'Không tìm thấy mã giao dịch trong khiếu nại. Agent cần mã giao dịch (VD: TXN_TRAIN_001) để tra cứu dữ liệu.',
     'create.alert_no_identity': 'Chưa đủ thông tin định danh tài khoản. Vui lòng cung cấp số điện thoại/email/user_id/wallet_id đăng ký ví để agent tra cứu trạng thái khóa và dữ liệu Risk/Fraud.',
+    'create.alert_no_merchant_id': 'Cần merchant_id, số điện thoại/email đăng ký merchant, mã số thuế hoặc mã payout/batch nếu có.',
+    'create.alert_manual_payout': 'Agent chỉ tạo bản nháp giải ngân thủ công. Không tự động chuyển tiền. Số tiền lấy từ settlement ledger.',
     'create.alert_errors_title': 'Chi tiết lỗi',
 
     /* ── History Panel ── */
@@ -310,6 +354,12 @@ const translations: Record<Lang, Record<string, string>> = {
     'detail.approve_comment': 'Đã phê duyệt qua cổng quản trị',
     'detail.approve_error': 'Phê duyệt thất bại',
     'detail.reject_error': 'Từ chối thất bại',
+    'detail.manual_payout_alert': 'Chỉ là bản nháp giải ngân thủ công.',
+    'detail.manual_payout_alert2': 'Hệ thống không tự động chuyển tiền. Số tiền lấy từ settlement ledger. Cần phê duyệt.',
+    'detail.unc_alert': 'Gửi biên lai UNC cho merchant.',
+    'detail.unc_alert2': 'Payout đã thành công. KHÔNG tạo payout mới.',
+    'detail.bank_correction_alert': 'Yêu cầu cập nhật tài khoản ngân hàng.',
+    'detail.bank_correction_alert2': 'Không tạo payout khi bank account chưa verified.',
 
 
 
@@ -359,6 +409,7 @@ const translations: Record<Lang, Record<string, string>> = {
     /* ── Layout / Nav ── */
     'nav.brand_subtitle': 'AI Back-office Workflow',
     'nav.cases': 'Cases',
+    'nav.chat_tickets': 'Customer Chat Tickets',
     'nav.create': 'Create Case',
     'nav.safety': 'Safety Checks',
     'nav.lang_toggle': '🌐 Tiếng Việt',
@@ -396,6 +447,10 @@ const translations: Record<Lang, Record<string, string>> = {
     'action.create_force_success_draft': 'Create Force Success Draft',
     'action.create_unlock_account_draft': 'Create Unlock Account Draft',
     'action.create_request_documents_response_draft': 'Request Documents',
+    'action.create_manual_payout_draft': 'Create Manual Payout Draft',
+    'action.send_unc_email_draft': 'Send UNC Email Draft',
+    'action.request_bank_account_correction': 'Request Bank Account Correction',
+    'action.manual_settlement_review': 'Manual Settlement Review',
     'action.manual_review': 'Manual Review',
     'action.no_action': 'No Action',
     'action.wait_sla': 'Wait SLA',
@@ -411,6 +466,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'workflow.fraud_account_lock': 'Fraud Account Lock Review',
     'workflow.train_ticket_reconciliation': 'Train Ticket Reconciliation',
     'workflow.utility_bill_reconciliation': 'Utility Bill Reconciliation',
+    'workflow.merchant_settlement_delay': 'Merchant Settlement',
 
     /* ── Service Type ── */
     'service.train_ticket': 'Train Ticket',

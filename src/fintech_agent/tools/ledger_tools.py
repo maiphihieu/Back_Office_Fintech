@@ -7,8 +7,12 @@ Refund amounts MUST come from here, never from complaint text.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from fintech_agent.database.repository_factory import get_ledger_repo
+
+if TYPE_CHECKING:
+    from fintech_agent.repositories.ledger_repository import LedgerRepository
 from fintech_agent.repositories.base import RecordNotFound
 from fintech_agent.schemas.evidence import WalletLedger
 from fintech_agent.tools.tool_errors import ToolDataNotFound, ToolTimeout

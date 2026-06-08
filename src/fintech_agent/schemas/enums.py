@@ -15,6 +15,7 @@ class ServiceType(StrEnum):
     WATER_BILL = "water_bill"
     WALLET_TOPUP = "wallet_topup"
     ACCOUNT_SECURITY = "account_security"
+    MERCHANT_SETTLEMENT = "merchant_settlement"
     UNKNOWN = "unknown"
 
 
@@ -28,6 +29,12 @@ class IssueType(StrEnum):
     DUPLICATE_CHARGE = "duplicate_charge"
     TOPUP_PENDING = "topup_pending"
     ACCOUNT_LOCKED = "account_locked"
+    # Merchant settlement issues
+    SETTLEMENT_DELAYED = "settlement_delayed"
+    PAYOUT_NOT_RECEIVED = "payout_not_received"
+    PAYOUT_FAILED = "payout_failed"
+    BANK_ACCOUNT_INVALID = "bank_account_invalid"
+    UNC_NOT_RECEIVED = "unc_not_received"
     UNKNOWN = "unknown"
 
 
@@ -123,6 +130,12 @@ class ActionType(StrEnum):
     CREATE_UNLOCK_ACCOUNT_DRAFT = "create_unlock_account_draft"
     CREATE_REQUEST_DOCUMENTS_RESPONSE_DRAFT = "create_request_documents_response_draft"
     REQUEST_IDENTITY_CORRECTION = "request_identity_correction"
+    # Merchant settlement actions
+    CREATE_MANUAL_PAYOUT_DRAFT = "create_manual_payout_draft"
+    CREATE_MERCHANT_EMAIL_DRAFT = "create_merchant_email_draft"
+    REQUEST_BANK_ACCOUNT_CORRECTION = "request_bank_account_correction"
+    SEND_UNC_EMAIL_DRAFT = "send_unc_email_draft"
+    MANUAL_SETTLEMENT_REVIEW = "manual_settlement_review"
     MANUAL_REVIEW = "manual_review"
     WAIT_SLA = "wait_sla"
     NO_ACTION = "no_action"

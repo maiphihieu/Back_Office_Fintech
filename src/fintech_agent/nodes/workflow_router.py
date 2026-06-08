@@ -16,7 +16,7 @@ def route_workflow(state: AgentState, audit: AuditLogger | None = None) -> Agent
     case_id = state.get("case_id", "")
     audit_ids: list[str] = list(state.get("audit_event_ids", []))
 
-    if workflow in ("train_ticket", "utility_bill", "wallet_topup", "fraud_account_lock"):
+    if workflow in ("train_ticket", "utility_bill", "wallet_topup", "fraud_account_lock", "merchant_settlement_delay"):
         if audit:
             ev = audit.log_event(
                 case_id, AuditEventType.WORKFLOW_ROUTED,

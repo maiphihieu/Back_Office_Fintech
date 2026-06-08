@@ -1,29 +1,23 @@
-/* ─── Resolution Ticket Panel — staff-friendly view for CS/Ops ─── */
-/* Actions come from rule engine, not LLM.
-   Staff-friendly labels shown by default.
-   Technical details (mcp_tool, mcp_input, etc.) hidden under accordion. */
+/* ─── Resolution Ticket Utilities & Standalone Sections ─── */
+/* Exports reusable label maps, format helpers, and standalone UI sections
+   for use by CaseDetailPage. No monolithic panel — layout is owned by the page. */
 
 import { useState } from 'react';
-import type { GeneratedResponse, ResolutionTicket, TicketAction } from '../api/types';
+import type { ClaimVerificationSummary, ResolutionTicket, TicketAction } from '../api/types';
 import { formatCurrency } from '../lib/format';
 
-interface Props {
-  ticket: ResolutionTicket | null | undefined;
-  aiResponse?: GeneratedResponse | null;
-}
-
 /* ═══════════════════════════════════════════════════════════════
-   STAFF-FRIENDLY LABEL MAPS
+   STAFF-FRIENDLY LABEL MAPS (exported for reuse)
    ═══════════════════════════════════════════════════════════════ */
 
-const RESOLUTION_STATUS: Record<string, { icon: string; label: string; cls: string }> = {
+export const RESOLUTION_STATUS: Record<string, { icon: string; label: string; cls: string }> = {
   actionable: { icon: '✅', label: 'Có thể xử lý theo quy trình', cls: 'badge-green' },
   manual_review_required: { icon: '👁', label: 'Cần nhân viên kiểm tra thủ công', cls: 'badge-amber' },
   missing_identity: { icon: '🔍', label: 'Chưa định danh được tài khoản — cần bổ sung thông tin', cls: 'badge-amber' },
   not_supported: { icon: '❌', label: 'Chưa hỗ trợ xử lý tự động', cls: 'badge-red' },
 };
 
-const LOCATION_LABELS: Record<string, { icon: string; label: string }> = {
+export const LOCATION_LABELS: Record<string, { icon: string; label: string }> = {
   wallet_system: { icon: '💰', label: 'Hệ thống ví' },
   bank: { icon: '🏦', label: 'Ngân hàng' },
   provider: { icon: '🏢', label: 'Nhà cung cấp dịch vụ' },
@@ -31,36 +25,64 @@ const LOCATION_LABELS: Record<string, { icon: string; label: string }> = {
   identity_lookup: { icon: '🔍', label: 'Tra cứu định danh tài khoản' },
   reconciliation: { icon: '🔄', label: 'Đối soát dữ liệu' },
   customer_input: { icon: '👤', label: 'Thông tin khách hàng cung cấp' },
+  settlement_pool: { icon: '🏦', label: 'Pool thanh toán (chưa giải ngân)' },
+  merchant_identity: { icon: '🔍', label: 'Chưa định danh được merchant' },
+  bank_transfer: { icon: '💸', label: 'Chuyển khoản ngân hàng' },
+  merchant_bank_account: { icon: '🏪', label: 'Tài khoản nhận tiền merchant' },
+  settlement_batch: { icon: '📦', label: 'Lệnh quyết toán batch' },
+  payout_system: { icon: '💰', label: 'Hệ thống giải ngân' },
   unknown: { icon: '❓', label: 'Chưa xác định' },
 };
 
-const EXEC_MODE_STAFF: Record<string, string> = {
+export const EXEC_MODE_STAFF: Record<string, string> = {
   draft_only: 'Chỉ tạo bản nháp, chưa xử lý thật',
   read_only: 'Chỉ tra cứu, không thay đổi dữ liệu',
   manual: 'Nhân viên cần xử lý thủ công',
+  information_request: 'Yêu cầu bổ sung thông tin — không có action tài chính',
 };
 
-const ACTION_STATUS_STAFF: Record<string, { icon: string; label: string; cls: string }> = {
+export const ACTION_STATUS_STAFF: Record<string, { icon: string; label: string; cls: string }> = {
   draft: { icon: '📝', label: 'Bản nháp', cls: 'badge-blue' },
   draft_ready: { icon: '📝', label: 'Nháp sẵn sàng', cls: 'badge-blue' },
   waiting_approval: { icon: '⏳', label: 'Đang chờ phê duyệt', cls: 'badge-amber' },
   manual_required: { icon: '🛠', label: 'Cần xử lý thủ công', cls: 'badge-purple' },
 };
 
-const MCP_TOOL_FRIENDLY: Record<string, string> = {
+export const MCP_TOOL_FRIENDLY: Record<string, string> = {
   create_force_success_draft: 'Tạo yêu cầu cập nhật giao dịch thành công',
   create_refund_draft: 'Tạo yêu cầu hoàn tiền',
   create_reconciliation_draft: 'Tạo phiếu đối soát',
   create_unlock_account_draft: 'Tạo yêu cầu mở khóa tài khoản',
   create_customer_response_draft: 'Soạn phản hồi cho khách hàng',
+  create_manual_payout_draft: 'Tạo bản nháp giải ngân thủ công',
+  send_unc_email_draft: 'Gửi UNC/mã tham chiếu cho Merchant',
+  request_bank_account_correction: 'Yêu cầu Merchant cập nhật tài khoản NH',
+  manual_settlement_review: 'Xử lý settlement review thủ công',
+  request_identity_correction: 'Yêu cầu bổ sung thông tin định danh Merchant',
 };
 
-const WORKFLOW_FRIENDLY: Record<string, string> = {
+export const WORKFLOW_FRIENDLY: Record<string, string> = {
   wallet_topup: 'Nạp tiền vào ví',
   train_ticket: 'Mua vé tàu',
   utility_bill: 'Thanh toán hóa đơn',
   fraud_account_lock: 'Khóa tài khoản (chống gian lận)',
+  merchant_settlement_delay: 'Giải ngân Merchant',
   unknown: 'Chưa xác định',
+};
+
+export const RISK_LABEL: Record<string, { icon: string; text: string }> = {
+  low:      { icon: '🟢', text: 'Thấp' },
+  medium:   { icon: '🟡', text: 'Trung bình' },
+  high:     { icon: '🟠', text: 'Cao' },
+  critical: { icon: '🔴', text: 'Nghiêm trọng' },
+  unknown:  { icon: '⚪', text: 'Chưa xác định' },
+};
+
+export const APPROVAL_STATUS_STAFF: Record<string, string> = {
+  not_required: '✅ Không cần phê duyệt',
+  pending: '⏳ Đang chờ phê duyệt',
+  approved: '✅ Đã được phê duyệt',
+  rejected: '❌ Đã bị từ chối',
 };
 
 const CLAIM_STATUS_BADGE: Record<string, { icon: string; label: string; cls: string }> = {
@@ -107,7 +129,20 @@ const TRUSTED_DATA_LABELS: Record<string, string> = {
   has_credit_refund: 'Đã hoàn tiền',
   bank_amount: 'Số tiền bank',
   bank_status: 'Trạng thái bank',
+  /* ── Merchant settlement ── */
+  merchant_id: 'Mã merchant',
+  merchant_name: 'Tên merchant',
+  net_settlement_amount: 'Số tiền ròng cần giải ngân',
+  settlement_cycle: 'Chu kỳ thanh toán',
+  settlement_date: 'Ngày settlement',
+  payout_status: 'Trạng thái payout',
+  bank_account_status: 'TK ngân hàng',
+  duplicate_payout_risk: 'Rủi ro payout trùng',
 };
+
+/* ═══════════════════════════════════════════════════════════════
+   FORMAT HELPERS (exported)
+   ═══════════════════════════════════════════════════════════════ */
 
 /** Format a claim value for display, applying currency suffix only when appropriate. */
 function formatClaimValue(value: string | number | null | undefined, unit: string | null | undefined): string {
@@ -128,12 +163,10 @@ const BOOLEAN_FIELD_LABELS: Record<string, Record<number, string>> = {
 /** Format a trusted data value for display — handles boolean-as-int and currency. */
 function formatTrustedValue(key: string, val: unknown): string {
   if (val == null) return '—';
-  // Boolean-as-int fields → human readable
   if (typeof val === 'number' && key in BOOLEAN_FIELD_LABELS) {
     const map = BOOLEAN_FIELD_LABELS[key];
     return map[val] ?? String(val);
   }
-  // Currency fields
   if (typeof val === 'number' && (key === 'action_amount' || key === 'bank_amount')) {
     return `${val.toLocaleString('vi-VN')}đ`;
   }
@@ -143,9 +176,183 @@ function formatTrustedValue(key: string, val: unknown): string {
   return String(val);
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   CLAIM VERIFICATION SECTION — standalone component
+   ═══════════════════════════════════════════════════════════════ */
 
-/* ─── Staff-Friendly Action Card ─── */
-function StaffActionCard({ action }: { action: TicketAction }) {
+interface ClaimVerificationProps {
+  cv: ClaimVerificationSummary;
+}
+
+export function ClaimVerificationSection({ cv }: ClaimVerificationProps) {
+  if (!cv || cv.claims.length === 0) return null;
+
+  return (
+    <div className="ci-card cv-standalone-card">
+      <h3 className="ci-card-title">🔍 Kiểm tra thông tin khách cung cấp</h3>
+
+      {/* Yellow warning: customer detail mismatch */}
+      {cv.has_customer_detail_mismatch && !cv.has_system_evidence_conflict && (
+        <div className="cv-warning cv-warning-yellow" id="cv-customer-mismatch-warning">
+          <span className="cv-warn-icon">⚠️</span>
+          <span>Thông tin khách cung cấp có điểm lệch. Agent sẽ xử lý theo dữ liệu chuẩn của hệ thống.</span>
+        </div>
+      )}
+
+      {/* Red warning: system evidence conflict */}
+      {cv.has_system_evidence_conflict && (
+        <div className="cv-warning cv-warning-red" id="cv-system-conflict-warning">
+          <span className="cv-warn-icon">🚨</span>
+          <span>Các nguồn dữ liệu hệ thống đang mâu thuẫn. Cần kiểm tra thủ công trước khi tạo action rủi ro.</span>
+        </div>
+      )}
+
+      {/* Claim verification table */}
+      <div className="cv-table-wrapper">
+        <table className="cv-table">
+          <thead>
+            <tr>
+              <th>Thông tin khách cung cấp</th>
+              <th>Dữ liệu hệ thống</th>
+              <th>Kết quả kiểm tra</th>
+              <th>Giải thích</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cv.claims.map((claim, i) => {
+              const badge = CLAIM_STATUS_BADGE[claim.verification_status] || CLAIM_STATUS_BADGE.not_verifiable;
+              const label = CLAIM_TYPE_LABELS[claim.claim_type] || claim.claim_type;
+              return (
+                <tr key={i} className={`cv-table-row cv-table-row-${claim.verification_status}`}>
+                  <td>
+                    <div className="cv-cell-label">{label}</div>
+                    <div className="cv-cell-value">{formatClaimValue(claim.customer_claimed_value, claim.unit)}</div>
+                    {claim.raw_text && (
+                      <div className="cv-cell-raw" title="Trích từ khiếu nại">&quot;{claim.raw_text}&quot;</div>
+                    )}
+                  </td>
+                  <td>
+                    <div className="cv-cell-value">
+                      {claim.trusted_system_value != null
+                        ? formatClaimValue(claim.trusted_system_value, claim.unit)
+                        : <span className="cv-na">—</span>}
+                    </div>
+                  </td>
+                  <td>
+                    <span className={`cv-badge ${badge.cls}`}>
+                      {badge.icon} {badge.label}
+                    </span>
+                  </td>
+                  <td>
+                    <span className="cv-explanation">{claim.explanation}</span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Trusted data used for action */}
+      {cv.trusted_data_used_for_action && Object.keys(cv.trusted_data_used_for_action).length > 0 && (
+        <div className="cv-trusted-data">
+          <span className="cv-trusted-label">📊 Dữ liệu chuẩn sẽ dùng cho action:</span>
+          <div className="cv-trusted-items">
+            {Object.entries(cv.trusted_data_used_for_action).map(([key, val]) => (
+              <span key={key} className="cv-trusted-item">
+                <span className="cv-trusted-key">{TRUSTED_DATA_LABELS[key] || key}:</span>
+                <span className="cv-trusted-val">
+                  {formatTrustedValue(key, val)}
+                </span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Staff explanation */}
+      {cv.staff_explanation && (
+        <div className="cv-staff-explanation">
+          <span className="cv-staff-label">👷 Giải thích cho nhân viên:</span>
+          <p className="cv-staff-text">{cv.staff_explanation}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   AMOUNT VERIFICATION SECTION — standalone component
+   ═══════════════════════════════════════════════════════════════ */
+
+interface AmountVerificationProps {
+  ticket: ResolutionTicket;
+}
+
+export function AmountVerificationSection({ ticket }: AmountVerificationProps) {
+  const av = ticket.amount_verification;
+  if (!av || (av.trusted_amount == null && av.customer_claimed_amount == null)) return null;
+
+  return (
+    <div className={`amt-verify-section ${av.has_amount_mismatch ? 'amt-mismatch' : ''}`}>
+      <div className="rt-section-label" style={{ marginBottom: 10 }}>💰 Dữ liệu chuẩn để xử lý</div>
+
+      {av.has_amount_mismatch && (
+        <div className="amt-mismatch-warning">
+          <span className="amt-warn-icon">⚠️</span>
+          <span>{av.mismatch_description}</span>
+        </div>
+      )}
+
+      <div className="amt-rows">
+        {av.customer_claimed_amount != null && (
+          <div className="amt-row">
+            <span className="amt-label">Số tiền khách khai</span>
+            <span className={`amt-value ${av.has_amount_mismatch ? 'amt-claimed' : ''}`}>
+              {formatCurrency(av.customer_claimed_amount)}
+              <span className="amt-tag amt-tag-ref">Tham khảo</span>
+            </span>
+          </div>
+        )}
+        {av.trusted_amount != null && (
+          <div className="amt-row">
+            <span className="amt-label">Số tiền hệ thống ghi nhận</span>
+            <span className="amt-value amt-trusted">
+              {formatCurrency(av.trusted_amount)}
+              <span className="amt-tag amt-tag-trusted">Nguồn chuẩn</span>
+            </span>
+          </div>
+        )}
+        {av.trusted_amount_source && (
+          <div className="amt-row">
+            <span className="amt-label">Nguồn dữ liệu</span>
+            <span className="amt-value">{av.trusted_amount_source}</span>
+          </div>
+        )}
+        {av.action_amount != null && (
+          <div className="amt-row amt-row-action">
+            <span className="amt-label">Số tiền sẽ dùng nếu tạo action</span>
+            <span className="amt-value amt-action">
+              {formatCurrency(av.action_amount)}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {!av.has_amount_mismatch && av.trusted_amount != null && (
+        <div className="amt-match-ok">
+          ✅ Số tiền khớp — hệ thống và khách hàng khai cùng giá trị.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   STAFF ACTION CARD — exported for approval panel
+   ═══════════════════════════════════════════════════════════════ */
+
+export function StaffActionCard({ action }: { action: TicketAction }) {
   const [showTech, setShowTech] = useState(false);
   const statusDisplay = ACTION_STATUS_STAFF[action.status] || ACTION_STATUS_STAFF.manual_required;
   const toolFriendly = action.mcp_tool ? (MCP_TOOL_FRIENDLY[action.mcp_tool] || action.mcp_tool) : null;
@@ -288,372 +495,6 @@ function StaffActionCard({ action }: { action: TicketAction }) {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   MAIN PANEL
-   ═══════════════════════════════════════════════════════════════ */
-
-export default function ResolutionTicketPanel({ ticket, aiResponse }: Props) {
-  const [copied, setCopied] = useState(false);
-  const [showAiDetail, setShowAiDetail] = useState(false);
-
-  if (!ticket) {
-    return (
-      <div className="rt-panel">
-        <div className="rt-header">
-          <span className="rt-icon">🎫</span>
-          <span className="rt-title">Phiếu xử lý</span>
-        </div>
-        <div className="rt-empty">
-          <span className="rt-empty-icon">📋</span>
-          <p>Chưa có phiếu xử lý.</p>
-        </div>
-      </div>
-    );
-  }
-
-  const statusDisplay = RESOLUTION_STATUS[ticket.resolution_status] || RESOLUTION_STATUS.not_supported;
-  const locDisplay = LOCATION_LABELS[ticket.problem_location] || { icon: '📍', label: ticket.problem_location };
-  const workflowFriendly = WORKFLOW_FRIENDLY[ticket.ticket_type] || ticket.ticket_type;
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(ticket.customer_reply_draft);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch { /* clipboard not available */ }
-  };
-
-  const debug = aiResponse?.debug;
-  const isLlm = debug?.generation_mode === 'llm';
-
-  return (
-    <div className="rt-panel">
-      {/* ══ Header ══ */}
-      <div className="rt-header">
-        <div className="rt-header-left">
-          <span className="rt-icon">🎫</span>
-          <span className="rt-title">Phiếu xử lý</span>
-        </div>
-        <div className="rt-header-badges">
-          <span className={`badge ${statusDisplay.cls}`}>
-            {statusDisplay.icon} {statusDisplay.label}
-          </span>
-          {isLlm && (
-            <span className="badge badge-cyan rt-llm-badge">
-              ✦ AI · {debug?.model_used || ''}
-            </span>
-          )}
-          {!isLlm && debug?.fallback_reason && (
-            <span className="badge badge-amber rt-llm-badge">⚠ Fallback</span>
-          )}
-        </div>
-      </div>
-
-      {/* ══ Body ══ */}
-      <div className="rt-body">
-        {/* ── Ticket Meta ── */}
-        <div className="rt-meta">
-          <div className="rt-meta-item">
-            <span className="rt-meta-label">Mã phiếu</span>
-            <code className="rt-meta-value">{ticket.ticket_id}</code>
-          </div>
-          <div className="rt-meta-item">
-            <span className="rt-meta-label">Loại giao dịch</span>
-            <span className="rt-meta-value">{workflowFriendly}</span>
-          </div>
-        </div>
-
-        {/* ── Issue Summary ── */}
-        <div className="rt-section">
-          <div className="rt-section-label">📋 Tóm tắt vấn đề</div>
-          <p className="rt-section-text">{ticket.issue_summary}</p>
-        </div>
-
-        {/* ── Claim Verification — Kiểm tra thông tin khách cung cấp ── */}
-        {ticket.claim_verification && ticket.claim_verification.claims.length > 0 && (() => {
-          const cv = ticket.claim_verification;
-          return (
-            <div className="rt-section cv-section">
-              <div className="rt-section-label">🔍 Kiểm tra thông tin khách cung cấp</div>
-
-              {/* Yellow warning: customer detail mismatch */}
-              {cv.has_customer_detail_mismatch && !cv.has_system_evidence_conflict && (
-                <div className="cv-warning cv-warning-yellow" id="cv-customer-mismatch-warning">
-                  <span className="cv-warn-icon">⚠️</span>
-                  <span>Thông tin khách cung cấp có điểm lệch. Agent sẽ xử lý theo dữ liệu chuẩn của hệ thống.</span>
-                </div>
-              )}
-
-              {/* Red warning: system evidence conflict */}
-              {cv.has_system_evidence_conflict && (
-                <div className="cv-warning cv-warning-red" id="cv-system-conflict-warning">
-                  <span className="cv-warn-icon">🚨</span>
-                  <span>Các nguồn dữ liệu hệ thống đang mâu thuẫn. Cần kiểm tra thủ công trước khi tạo action rủi ro.</span>
-                </div>
-              )}
-
-              {/* Claim verification table */}
-              <div className="cv-table-wrapper">
-                <table className="cv-table">
-                  <thead>
-                    <tr>
-                      <th>Thông tin khách cung cấp</th>
-                      <th>Dữ liệu hệ thống ghi nhận</th>
-                      <th>Kết quả kiểm tra</th>
-                      <th>Nguồn dữ liệu chuẩn</th>
-                      <th>Giải thích cho nhân viên</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cv.claims.map((claim, i) => {
-                      const badge = CLAIM_STATUS_BADGE[claim.verification_status] || CLAIM_STATUS_BADGE.not_verifiable;
-                      const label = CLAIM_TYPE_LABELS[claim.claim_type] || claim.claim_type;
-                      return (
-                        <tr key={i} className={`cv-table-row cv-table-row-${claim.verification_status}`}>
-                          <td>
-                            <div className="cv-cell-label">{label}</div>
-                            <div className="cv-cell-value">{formatClaimValue(claim.customer_claimed_value, claim.unit)}</div>
-                            {claim.raw_text && (
-                              <div className="cv-cell-raw" title="Trích từ khiếu nại">&quot;{claim.raw_text}&quot;</div>
-                            )}
-                          </td>
-                          <td>
-                            <div className="cv-cell-value">
-                              {claim.trusted_system_value != null
-                                ? formatClaimValue(claim.trusted_system_value, claim.unit)
-                                : <span className="cv-na">—</span>}
-                            </div>
-                          </td>
-                          <td>
-                            <span className={`cv-badge ${badge.cls}`}>
-                              {badge.icon} {badge.label}
-                            </span>
-                          </td>
-                          <td>
-                            <span className="cv-source">{claim.trusted_source || '—'}</span>
-                          </td>
-                          <td>
-                            <span className="cv-explanation">{claim.explanation}</span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Trusted data used for action */}
-              {cv.trusted_data_used_for_action && Object.keys(cv.trusted_data_used_for_action).length > 0 && (
-                <div className="cv-trusted-data">
-                  <span className="cv-trusted-label">📊 Dữ liệu chuẩn sẽ dùng cho action:</span>
-                  <div className="cv-trusted-items">
-                    {Object.entries(cv.trusted_data_used_for_action).map(([key, val]) => (
-                      <span key={key} className="cv-trusted-item">
-                        <span className="cv-trusted-key">{TRUSTED_DATA_LABELS[key] || key}:</span>
-                        <span className="cv-trusted-val">
-                          {formatTrustedValue(key, val)}
-                        </span>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Staff explanation */}
-              {cv.staff_explanation && (
-                <div className="cv-staff-explanation">
-                  <span className="cv-staff-label">👷 Giải thích cho nhân viên:</span>
-                  <p className="cv-staff-text">{cv.staff_explanation}</p>
-                </div>
-              )}
-            </div>
-          );
-        })()}
-
-        {/* ── Problem Location ── */}
-        <div className="rt-section">
-          <div className="rt-section-label">📍 Vấn đề nằm ở đâu</div>
-          <div className="rt-location-row">
-            <span className="rt-location-badge">
-              {locDisplay.icon} {locDisplay.label}
-            </span>
-          </div>
-          {ticket.problem_explanation && (
-            <p className="rt-section-text rt-explanation">{ticket.problem_explanation}</p>
-          )}
-        </div>
-
-        {/* ── Amount Verification — Dữ liệu chuẩn để xử lý ── */}
-        {ticket.amount_verification && (ticket.amount_verification.trusted_amount != null || ticket.amount_verification.customer_claimed_amount != null) && (() => {
-          const av = ticket.amount_verification;
-          return (
-            <div className={`rt-section amt-verify-section ${av.has_amount_mismatch ? 'amt-mismatch' : ''}`}>
-              <div className="rt-section-label">💰 Dữ liệu chuẩn để xử lý</div>
-
-              {av.has_amount_mismatch && (
-                <div className="amt-mismatch-warning">
-                  <span className="amt-warn-icon">⚠️</span>
-                  <span>{av.mismatch_description}</span>
-                </div>
-              )}
-
-              <div className="amt-rows">
-                {av.customer_claimed_amount != null && (
-                  <div className="amt-row">
-                    <span className="amt-label">Số tiền khách khai</span>
-                    <span className={`amt-value ${av.has_amount_mismatch ? 'amt-claimed' : ''}`}>
-                      {formatCurrency(av.customer_claimed_amount)}
-                      <span className="amt-tag amt-tag-ref">Tham khảo</span>
-                    </span>
-                  </div>
-                )}
-                {av.trusted_amount != null && (
-                  <div className="amt-row">
-                    <span className="amt-label">Số tiền hệ thống ghi nhận</span>
-                    <span className="amt-value amt-trusted">
-                      {formatCurrency(av.trusted_amount)}
-                      <span className="amt-tag amt-tag-trusted">Nguồn chuẩn</span>
-                    </span>
-                  </div>
-                )}
-                {av.trusted_amount_source && (
-                  <div className="amt-row">
-                    <span className="amt-label">Nguồn dữ liệu</span>
-                    <span className="amt-value">{av.trusted_amount_source}</span>
-                  </div>
-                )}
-                {av.action_amount != null && (
-                  <div className="amt-row amt-row-action">
-                    <span className="amt-label">Số tiền sẽ dùng nếu tạo action</span>
-                    <span className="amt-value amt-action">
-                      {formatCurrency(av.action_amount)}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {!av.has_amount_mismatch && av.trusted_amount != null && (
-                <div className="amt-match-ok">
-                  ✅ Số tiền khớp — hệ thống và khách hàng khai cùng giá trị.
-                </div>
-              )}
-            </div>
-          );
-        })()}
-
-        {/* ── Recommended Actions (staff-friendly) ── */}
-        {ticket.recommended_actions.length > 0 && (
-          <div className="rt-section rt-actions-section">
-            <div className="rt-section-label">⚡ Hành động đề xuất</div>
-            <div className="rt-actions-table">
-              {ticket.recommended_actions.map((action, i) => (
-                <StaffActionCard key={i} action={action} />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ── Evidence Checked / Missing ── */}
-        <div className="rt-section">
-          <div className="rt-section-label">📊 Dữ liệu đã kiểm tra</div>
-          {ticket.evidence_checked.length > 0 && (
-            <div className="rt-evidence-group">
-              <span className="rt-evidence-heading">✅ Đã kiểm tra:</span>
-              <div className="rt-tags">
-                {ticket.evidence_checked.map((ev, i) => (
-                  <span key={i} className="rt-tag rt-tag-checked">{ev}</span>
-                ))}
-              </div>
-            </div>
-          )}
-          {ticket.missing_evidence.length > 0 && (
-            <div className="rt-evidence-group">
-              <span className="rt-evidence-heading">⚠ Còn thiếu:</span>
-              <div className="rt-tags">
-                {ticket.missing_evidence.map((ev, i) => (
-                  <span key={i} className="rt-tag rt-tag-missing">{ev}</span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* ── Staff Instruction ── */}
-        <div className="rt-section rt-staff-section">
-          <div className="rt-section-label">👷 Hướng dẫn cho nhân viên</div>
-          <p className="rt-section-text">{ticket.staff_instruction}</p>
-        </div>
-
-        {/* ── Customer Reply Draft ── */}
-        <div className="rt-section rt-reply-section">
-          <div className="rt-reply-header">
-            <span className="rt-section-label">💬 Nháp trả lời khách hàng</span>
-            {ticket.customer_reply_draft && (
-              <button className="rt-copy-btn" onClick={handleCopy} title="Copy câu trả lời">
-                {copied ? '✓ Đã copy' : '📋 Copy'}
-              </button>
-            )}
-          </div>
-          <div className="rt-reply-box">{ticket.customer_reply_draft}</div>
-        </div>
-
-        {/* ── Safety Notes ── */}
-        {ticket.safety_notes.length > 0 && (
-          <div className="rt-section rt-safety-section">
-            <div className="rt-section-label">⚠️ Lưu ý an toàn</div>
-            <ul className="rt-safety-list">
-              {ticket.safety_notes.map((note, i) => (
-                <li key={i}>{note}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* ── Collapsible AI Detail ── */}
-        {aiResponse && (
-          <div className="rt-section rt-ai-detail">
-            <button
-              className="rt-ai-toggle"
-              onClick={() => setShowAiDetail(!showAiDetail)}
-            >
-              <span>🤖 Chi tiết phân tích AI</span>
-              <span className={`rt-chevron ${showAiDetail ? 'rt-chevron-open' : ''}`}>▾</span>
-            </button>
-            {showAiDetail && (
-              <div className="rt-ai-body">
-                <div className="rt-ai-row">
-                  <span className="rt-detail-label">Phân tích nội bộ</span>
-                  <p className="rt-detail-value">{aiResponse.internal_summary}</p>
-                </div>
-                <div className="rt-ai-row">
-                  <span className="rt-detail-label">Bước tiếp theo</span>
-                  <p className="rt-detail-value">{aiResponse.recommended_next_step}</p>
-                </div>
-                {aiResponse.evidence_supporting_problem_location?.length > 0 && (
-                  <div className="rt-ai-row">
-                    <span className="rt-detail-label">Dữ liệu hỗ trợ kết luận</span>
-                    <div className="rt-tags">
-                      {aiResponse.evidence_supporting_problem_location.map((ev, i) => (
-                        <span key={i} className="rt-tag rt-tag-supporting">{ev}</span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {aiResponse.problem_location_confidence && (
-                  <div className="rt-ai-row">
-                    <span className="rt-detail-label">Độ tin cậy</span>
-                    <span className="rt-detail-value">{aiResponse.problem_location_confidence}</span>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

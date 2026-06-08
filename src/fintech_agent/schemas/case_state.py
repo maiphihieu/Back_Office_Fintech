@@ -46,6 +46,16 @@ class ExtractedInfo(BaseModel):
     email: str | None = None
     wallet_id: str | None = None
 
+    # --- Merchant settlement fields (Case 3) ---
+    merchant_id: str | None = None
+    merchant_name: str | None = None
+    tax_code: str | None = None
+    settlement_date: str | None = None
+    settlement_cycle: str | None = None
+    payout_id: str | None = None
+    batch_id: str | None = None
+    bank_account_number: str | None = None
+
     # --- LLM extraction extras (Phase 2) ---
     amount_claimed: int | None = Field(default=None, ge=0)
     language: str | None = None

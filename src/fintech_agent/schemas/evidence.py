@@ -199,7 +199,103 @@ class EvidenceConflict(BaseModel):
     )
 
 
-# ─── Evidence Bundle ────────────────────────────────────────
+# ─── Merchant Settlement ────────────────────────────────────
+
+
+class MerchantProfile(BaseModel):
+    """Merchant profile — identity and settlement config."""
+
+    merchant_id: str = Field(..., min_length=1)
+    merchant_name: str | None = None
+    tax_code: str | None = None
+    contact_email: str | None = None
+    phone: str | None = None
+    status: str | None = None
+    settlement_cycle: str | None = None
+    bank_account_id: str | None = None
+    created_at: datetime | None = None
+
+
+class MerchantBankAccount(BaseModel):
+    """Merchant bank account — destination for settlement payouts."""
+
+    bank_account_id: str = Field(..., min_length=1)
+    merchant_id: str = Field(..., min_length=1)
+    bank_code: str | None = None
+    bank_name: str | None = None
+    account_number: str | None = None
+    account_holder_name: str | None = None
+    branch_name: str | None = None
+    verification_status: str | None = None
+    is_active: bool | None = None
+    failure_reason: str | None = None
+    last_verified_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class SettlementBatch(BaseModel):
+    """Settlement batch — batch-level settlement processing record."""
+
+    batch_id: str = Field(..., min_length=1)
+    settlement_date: str | None = None
+    cycle: str | None = None
+    status: str | None = None
+    total_merchants: int | None = None
+    total_amount: int | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    failure_reason: str | None = None
+    created_at: datetime | None = None
+
+
+class MerchantSettlementLedger(BaseModel):
+    """Merchant settlement ledger — per-merchant settlement breakdown."""
+
+    ledger_id: str = Field(..., min_length=1)
+    merchant_id: str = Field(..., min_length=1)
+    settlement_date: str | None = None
+    due_date: str | None = None
+    gross_amount: int | None = None
+    fee_amount: int | None = None
+    refund_amount: int | None = None
+    chargeback_amount: int | None = None
+    net_settlement_amount: int | None = None
+    currency: str | None = None
+    status: str | None = None
+    created_at: datetime | None = None
+
+
+class MerchantPayout(BaseModel):
+    """Merchant payout — individual disbursement attempt."""
+
+    payout_id: str = Field(..., min_length=1)
+    batch_id: str | None = None
+    merchant_id: str = Field(..., min_length=1)
+    settlement_date: str | None = None
+    bank_account_id: str | None = None
+    amount: int | None = None
+    currency: str | None = None
+    status: str | None = None
+    bank_transfer_ref: str | None = None
+    failure_reason: str | None = None
+    scheduled_date: str | None = None
+    executed_at: datetime | None = None
+    created_at: datetime | None = None
+
+
+class BankTransferReceipt(BaseModel):
+    """Bank transfer receipt — UNC confirmation from bank."""
+
+    receipt_id: str = Field(..., min_length=1)
+    payout_id: str | None = None
+    bank_transfer_ref: str | None = None
+    bank_status: str | None = None
+    unc_number: str | None = None
+    receipt_url: str | None = None
+    sent_to_merchant: bool | None = None
+    sent_at: datetime | None = None
+    created_at: datetime | None = None
+
 
 
 class EvidenceBundle(BaseModel):
@@ -216,6 +312,13 @@ class EvidenceBundle(BaseModel):
     reconciliation_status: ReconciliationStatus | None = None
     account_status: AccountStatus | None = None
     fraud_case: FraudCase | None = None
+    # Merchant settlement evidence
+    merchant_profile: MerchantProfile | None = None
+    merchant_bank_account: MerchantBankAccount | None = None
+    settlement_batch: SettlementBatch | None = None
+    merchant_settlement_ledger: MerchantSettlementLedger | None = None
+    merchant_payout: MerchantPayout | None = None
+    bank_transfer_receipt: BankTransferReceipt | None = None
     conflicts: list[EvidenceConflict] = Field(default_factory=list)
     tool_errors: list[str] = Field(
         default_factory=list,

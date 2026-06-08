@@ -16,6 +16,9 @@ from fintech_agent import __version__
 from fintech_agent.api.health import router as health_router
 from fintech_agent.api.cases import router as cases_router
 from fintech_agent.api.approvals import router as approvals_router
+from fintech_agent.api.customer_chat import router as customer_chat_router
+from fintech_agent.api.mock_auth import router as mock_auth_router
+from fintech_agent.api.chat_handoff import router as chat_handoff_router
 
 
 def create_app() -> FastAPI:
@@ -50,6 +53,9 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(cases_router)
     app.include_router(approvals_router)
+    app.include_router(customer_chat_router)  # Customer-facing chat (sanitized)
+    app.include_router(mock_auth_router)       # Mock customer auth (demo login)
+    app.include_router(chat_handoff_router)    # Back-office chat handoff tickets
 
     return app
 

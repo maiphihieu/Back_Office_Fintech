@@ -48,6 +48,14 @@ class ExtractedInfoResponse(BaseModel):
     confidence: float | None = None
     extraction_method: str | None = None
     missing_fields: list[str] = Field(default_factory=list)
+    # Merchant settlement fields
+    merchant_id: str | None = None
+    merchant_name: str | None = None
+    tax_code: str | None = None
+    settlement_cycle: str | None = None
+    settlement_date: str | None = None
+    payout_id: str | None = None
+    batch_id: str | None = None
 
 
 class EvidenceBundleResponse(BaseModel):
@@ -57,6 +65,13 @@ class EvidenceBundleResponse(BaseModel):
     provider_status: dict | None = None
     refund_status: dict | None = None
     reconciliation_status: dict | None = None
+    # Merchant settlement evidence
+    merchant_profile: dict | None = None
+    merchant_bank_account: dict | None = None
+    merchant_settlement_ledger: dict | None = None
+    settlement_batch: dict | None = None
+    merchant_payout: dict | None = None
+    bank_transfer_receipt: dict | None = None
 
 
 class ConflictResponse(BaseModel):

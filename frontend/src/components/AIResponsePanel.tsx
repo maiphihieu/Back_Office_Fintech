@@ -16,6 +16,7 @@ const LOCATION_LABELS: Record<string, { icon: string; label: string }> = {
   provider: { icon: '🏢', label: 'Nhà cung cấp' },
   fraud_system: { icon: '🚨', label: 'Hệ thống Fraud' },
   reconciliation: { icon: '🔄', label: 'Đối soát' },
+  identity_lookup: { icon: '🔍', label: 'Tra cứu định danh tài khoản' },
   customer_input: { icon: '👤', label: 'Thông tin khách hàng' },
   unknown: { icon: '❓', label: 'Chưa xác định' },
 };
@@ -56,6 +57,7 @@ export default function AIResponsePanel({ response }: Props) {
 
   const loc = getLocationDisplay(response.problem_location);
   const conf = getConfidenceDisplay(response.problem_location_confidence || 'unknown');
+  const missingData = response.missing_data || [];
 
   const handleCopy = async () => {
     try {
@@ -97,9 +99,9 @@ export default function AIResponsePanel({ response }: Props) {
           <p className="ai-section-text">{response.case_summary}</p>
         </div>
 
-        {/* Problem Location + Confidence */}
+        {/* Điểm nghẽn + Confidence */}
         <div className="ai-section">
-          <div className="ai-section-label">📍 Vấn đề nằm ở đâu</div>
+          <div className="ai-section-label">🔴 Điểm nghẽn</div>
           <div className="ai-location-row">
             <div className="ai-location-badge">
               <span>{loc.icon}</span>
@@ -117,10 +119,10 @@ export default function AIResponsePanel({ response }: Props) {
           <p className="ai-section-text">{response.problem_explanation}</p>
         </div>
 
-        {/* Supporting Evidence for problem_location */}
+        {/* Bằng chứng từ dữ liệu */}
         {supportingEvidence.length > 0 && (
           <div className="ai-section">
-            <div className="ai-section-label">🎯 Evidence dùng để kết luận</div>
+            <div className="ai-section-label">📊 Bằng chứng từ dữ liệu</div>
             <div className="ai-evidence-list">
               {supportingEvidence.map((ev, i) => (
                 <span key={i} className="ai-evidence-tag ai-evidence-supporting">{ev}</span>
@@ -147,11 +149,23 @@ export default function AIResponsePanel({ response }: Props) {
           <p className="ai-section-text">{response.internal_summary}</p>
         </div>
 
-        {/* Recommended Next Step */}
+        {/* Nhân viên cần làm gì tiếp theo */}
         <div className="ai-section ai-section-action">
-          <div className="ai-section-label">👉 Bước tiếp theo</div>
+          <div className="ai-section-label">🛠 Nhân viên cần làm gì tiếp theo</div>
           <p className="ai-section-text">{response.recommended_next_step}</p>
         </div>
+
+        {/* Thiếu dữ liệu (only when missing_data is not empty) */}
+        {missingData.length > 0 && (
+          <div className="ai-section ai-section-safety">
+            <div className="ai-section-label">⚠️ Thiếu dữ liệu</div>
+            <div className="ai-evidence-list">
+              {missingData.map((field, i) => (
+                <span key={i} className="ai-evidence-tag ai-evidence-missing">{field}</span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Customer Reply Draft */}
         <div className="ai-section ai-section-reply">

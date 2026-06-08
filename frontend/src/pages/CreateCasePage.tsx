@@ -25,6 +25,7 @@ const CHIP_COMPLAINTS: Record<string, string> = {
   chip_topup: 'Tôi nạp tiền từ ngân hàng vào ví, tài khoản ngân hàng đã trừ tiền nhưng ví vẫn báo 0 đồng. Mã giao dịch TXN_TOPUP_001',
   chip_conflict: 'Giao dịch TXN_CONFLICT_001 mua vé tàu bị lỗi. Ví đã trừ tiền nhưng hệ thống hiện đang pending.',
   chip_fraud: 'Tài khoản của tôi bất ngờ bị khóa vô cớ, tôi không thể rút tiền. Số điện thoại 0981000001',
+  chip_merchant: 'Chúng tôi là merchant MERCHANT_001, chu kỳ thanh toán D+1 nhưng đến ngày 2024-03-16 vẫn chưa nhận được tiền giải ngân settlement. Mã số thuế 0100000001.',
 };
 
 export default function CreateCasePage() {
@@ -333,7 +334,7 @@ export default function CreateCasePage() {
         {/* Quick scenario chips */}
         {messages.length === 0 && !isViewingHistory && (
           <div className="chip-bar">
-            {(['chip_train', 'chip_bill', 'chip_provider', 'chip_topup', 'chip_conflict', 'chip_fraud'] as const).map(chip => (
+            {(['chip_train', 'chip_bill', 'chip_provider', 'chip_topup', 'chip_conflict', 'chip_fraud', 'chip_merchant'] as const).map(chip => (
               <button
                 key={chip}
                 className="scenario-chip"
@@ -367,6 +368,7 @@ export default function CreateCasePage() {
                     <option value="electric_bill">{t('service.electric_bill')}</option>
                     <option value="water_bill">{t('service.water_bill')}</option>
                     <option value="wallet_topup">{t('service.wallet_topup')}</option>
+                    <option value="merchant_settlement">{t('service.merchant_settlement')}</option>
                   </select>
                 </div>
               </div>
@@ -397,6 +399,14 @@ export default function CreateCasePage() {
               {lastResult.extracted_info.phone && <div className="panel-row"><span>📞 Phone</span><span className="mono">{lastResult.extracted_info.phone}</span></div>}
               {lastResult.extracted_info.email && <div className="panel-row"><span>📧 Email</span><span className="mono">{lastResult.extracted_info.email}</span></div>}
               {lastResult.extracted_info.wallet_id && <div className="panel-row"><span>💳 Wallet ID</span><span className="mono">{lastResult.extracted_info.wallet_id}</span></div>}
+              {/* Merchant settlement fields */}
+              {lastResult.extracted_info.merchant_id && <div className="panel-row"><span>🏪 Merchant ID</span><span className="mono">{lastResult.extracted_info.merchant_id}</span></div>}
+              {lastResult.extracted_info.merchant_name && <div className="panel-row"><span>🏪 Tên merchant</span><span>{lastResult.extracted_info.merchant_name}</span></div>}
+              {lastResult.extracted_info.tax_code && <div className="panel-row"><span>📝 Mã số thuế</span><span className="mono">{lastResult.extracted_info.tax_code}</span></div>}
+              {lastResult.extracted_info.settlement_cycle && <div className="panel-row"><span>🔄 Chu kỳ thanh toán</span><span>{lastResult.extracted_info.settlement_cycle}</span></div>}
+              {lastResult.extracted_info.settlement_date && <div className="panel-row"><span>📅 Ngày settlement</span><span>{lastResult.extracted_info.settlement_date}</span></div>}
+              {lastResult.extracted_info.payout_id && <div className="panel-row"><span>💰 Payout ID</span><span className="mono">{lastResult.extracted_info.payout_id}</span></div>}
+              {lastResult.extracted_info.batch_id && <div className="panel-row"><span>📦 Batch ID</span><span className="mono">{lastResult.extracted_info.batch_id}</span></div>}
             </div>
           ) : null}
         </div>
@@ -405,7 +415,7 @@ export default function CreateCasePage() {
         <div className="panel-card">
           <h4 className="panel-title">⚙️ {t('create.panel_workflow')}</h4>
           <div className="panel-list">
-            {(['train_ticket', 'utility_bill', 'wallet_topup', 'fraud_account_lock', 'train_ticket_reconciliation', 'utility_bill_reconciliation'] as const).map(wf => (
+            {(['train_ticket', 'utility_bill', 'wallet_topup', 'fraud_account_lock', 'merchant_settlement_delay', 'train_ticket_reconciliation', 'utility_bill_reconciliation'] as const).map(wf => (
               <div key={wf} className={`workflow-item ${lastResult?.selected_workflow === wf ? 'active' : ''}`}>
                 <span className="workflow-dot" />
                 {t(`workflow.${wf}`)}
@@ -433,15 +443,21 @@ export default function CreateCasePage() {
           </div>
         </div>
 
-        {/* Source of Truth */}
-        <div className="panel-card">
-          <h4 className="panel-title">📊 {t('create.panel_source')}</h4>
-          <div className="panel-list">
-            <div className="source-row"><span className="source-icon">💰</span><span>{t('create.source_wallet')}</span></div>
-            <div className="source-row"><span className="source-icon">🏢</span><span>{t('create.source_provider')}</span></div>
-            <div className="source-row"><span className="source-icon">🔄</span><span>{t('create.source_refund')}</span></div>
+        {/* Source of Truth — collapsed by default */}
+        <details className="panel-card result-detail-section">
+          <summary>📊 {t('create.panel_source')}</summary>
+          <div className="result-detail-body">
+            <div className="panel-list">
+              <div className="source-row"><span className="source-icon">💰</span><span>{t('create.source_wallet')}</span></div>
+              <div className="source-row"><span className="source-icon">🏢</span><span>{t('create.source_provider')}</span></div>
+              <div className="source-row"><span className="source-icon">🔄</span><span>{t('create.source_refund')}</span></div>
+              <div className="source-row"><span className="source-icon">📊</span><span>{t('create.source_settlement')}</span></div>
+              <div className="source-row"><span className="source-icon">💸</span><span>{t('create.source_payout')}</span></div>
+              <div className="source-row"><span className="source-icon">🏦</span><span>{t('create.source_bank_account')}</span></div>
+              <div className="source-row"><span className="source-icon">📄</span><span>{t('create.source_unc')}</span></div>
+            </div>
           </div>
-        </div>
+        </details>
       </div>
     </div>
   );
@@ -460,6 +476,8 @@ function ResultCard({ result, t, navigate, onNewCase }: {
   const ei = result.extracted_info;
   const isRefund = result.recommended_action === 'create_refund_request_draft';
   const isForceSuccess = result.recommended_action === 'create_force_success_draft';
+  const isManualPayout = result.recommended_action === 'create_manual_payout_draft';
+  const isMerchantWorkflow = result.selected_workflow === 'merchant_settlement_delay';
   const errors = result.errors || [];
 
   /* ── Classify errors for friendly alerts ── */
@@ -525,13 +543,18 @@ function ResultCard({ result, t, navigate, onNewCase }: {
             <span className="alert-icon">⚡</span>{t('create.alert_force_success')}
           </div>
         )}
+        {isManualPayout && (
+          <div className="alert alert-warning" style={{ margin: '10px 0', fontSize: '0.8rem' }}>
+            <span className="alert-icon">🏪</span>{t('create.alert_manual_payout')}
+          </div>
+        )}
         {ei && ei.missing_fields.length > 0 && !hasCriticalMissing && (
           <div className="alert alert-info" style={{ margin: '10px 0', fontSize: '0.8rem' }}>
             <span className="alert-icon">ℹ️</span>{t('create.alert_missing', { fields: ei.missing_fields.join(', ') })}
           </div>
         )}
 
-        {/* Result grid */}
+        {/* Result grid — essential fields always visible */}
         <div className="result-grid">
           <div className="result-row">
             <span className="result-label">{t('create.result_workflow')}</span>
@@ -559,40 +582,68 @@ function ResultCard({ result, t, navigate, onNewCase }: {
           </div>
         </div>
 
-        {/* Extracted info */}
-        {ei && (
-          <div className="result-extracted">
-            <div className="result-row"><span className="result-label">User</span><span className="result-value mono">{ei.user_id || '—'}</span></div>
-            <div className="result-row"><span className="result-label">Transaction</span><span className="result-value mono">{ei.transaction_id || '—'}</span></div>
-            <div className="result-row"><span className="result-label">Service</span><span className="result-value">{ei.service_type ? t(`service.${ei.service_type}`) : '—'}</span></div>
-            <div className="result-row"><span className="result-label">Issue</span><span className="result-value">{ei.issue_type ? t(`issue.${ei.issue_type}`) : '—'}</span></div>
-            {ei.amount_claimed != null && (
-              <div className="result-row"><span className="result-label">Amount</span><span className="result-value" style={{ color: 'var(--amber)' }}>{formatCurrency(ei.amount_claimed)}</span></div>
+        {/* Collapsible detail section — extracted info + AI analysis */}
+        <details className="result-detail-section">
+          <summary>📋 Xem chi tiết phân tích</summary>
+          <div className="result-detail-body">
+            {/* Extracted info */}
+            {ei && (
+              <div className="result-extracted">
+                <div className="result-row"><span className="result-label">User</span><span className="result-value mono">{ei.user_id || '—'}</span></div>
+                <div className="result-row"><span className="result-label">Transaction</span><span className="result-value mono">{ei.transaction_id || '—'}</span></div>
+                <div className="result-row"><span className="result-label">Service</span><span className="result-value">{ei.service_type ? t(`service.${ei.service_type}`) : '—'}</span></div>
+                <div className="result-row"><span className="result-label">Issue</span><span className="result-value">{ei.issue_type ? t(`issue.${ei.issue_type}`) : '—'}</span></div>
+                {ei.amount_claimed != null && (
+                  <div className="result-row"><span className="result-label">Amount</span><span className="result-value" style={{ color: 'var(--amber)' }}>{formatCurrency(ei.amount_claimed)}</span></div>
+                )}
+                {ei.phone && (
+                  <div className="result-row"><span className="result-label">📞 Phone</span><span className="result-value mono">{ei.phone}</span></div>
+                )}
+                {ei.email && (
+                  <div className="result-row"><span className="result-label">📧 Email</span><span className="result-value mono">{ei.email}</span></div>
+                )}
+                {ei.wallet_id && (
+                  <div className="result-row"><span className="result-label">💳 Wallet ID</span><span className="result-value mono">{ei.wallet_id}</span></div>
+                )}
+                {/* Merchant settlement extracted fields */}
+                {isMerchantWorkflow && ei.merchant_id && (
+                  <div className="result-row"><span className="result-label">🏪 Merchant ID</span><span className="result-value mono">{ei.merchant_id}</span></div>
+                )}
+                {isMerchantWorkflow && ei.merchant_name && (
+                  <div className="result-row"><span className="result-label">🏪 Tên merchant</span><span className="result-value">{ei.merchant_name}</span></div>
+                )}
+                {isMerchantWorkflow && ei.tax_code && (
+                  <div className="result-row"><span className="result-label">📝 MST</span><span className="result-value mono">{ei.tax_code}</span></div>
+                )}
+                {isMerchantWorkflow && ei.settlement_cycle && (
+                  <div className="result-row"><span className="result-label">🔄 Chu kỳ</span><span className="result-value">{ei.settlement_cycle}</span></div>
+                )}
+                {isMerchantWorkflow && ei.settlement_date && (
+                  <div className="result-row"><span className="result-label">📅 Ngày settlement</span><span className="result-value">{ei.settlement_date}</span></div>
+                )}
+                {isMerchantWorkflow && ei.payout_id && (
+                  <div className="result-row"><span className="result-label">💰 Payout ID</span><span className="result-value mono">{ei.payout_id}</span></div>
+                )}
+                {isMerchantWorkflow && ei.batch_id && (
+                  <div className="result-row"><span className="result-label">📦 Batch ID</span><span className="result-value mono">{ei.batch_id}</span></div>
+                )}
+              </div>
             )}
-            {ei.phone && (
-              <div className="result-row"><span className="result-label">📞 Phone</span><span className="result-value mono">{ei.phone}</span></div>
+
+            {/* Collapsible raw errors */}
+            {hasErrors && (
+              <details className="error-details">
+                <summary className="error-details-toggle">{t('create.alert_errors_title')} ({errors.length})</summary>
+                <ul className="error-details-list">
+                  {errors.map((err, i) => <li key={i}>{err}</li>)}
+                </ul>
+              </details>
             )}
-            {ei.email && (
-              <div className="result-row"><span className="result-label">📧 Email</span><span className="result-value mono">{ei.email}</span></div>
-            )}
-            {ei.wallet_id && (
-              <div className="result-row"><span className="result-label">💳 Wallet ID</span><span className="result-value mono">{ei.wallet_id}</span></div>
-            )}
+
+            {/* AI Response Panel */}
+            <AIResponsePanel response={result.generated_response} />
           </div>
-        )}
-
-        {/* Collapsible raw errors (for power users) */}
-        {hasErrors && (
-          <details className="error-details">
-            <summary className="error-details-toggle">{t('create.alert_errors_title')} ({errors.length})</summary>
-            <ul className="error-details-list">
-              {errors.map((err, i) => <li key={i}>{err}</li>)}
-            </ul>
-          </details>
-        )}
-
-        {/* AI Response Panel */}
-        <AIResponsePanel response={result.generated_response} />
+        </details>
 
         {/* Action buttons */}
         <div className="result-actions">

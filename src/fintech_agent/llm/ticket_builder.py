@@ -198,6 +198,132 @@ _ACTION_MAP: dict[str, dict[str, Any]] = {
             "Chỉ yêu cầu khách bổ sung thông tin định danh",
         ],
     },
+    # ── Merchant settlement actions ──────────────────────────
+    "create_manual_payout_draft": {
+        "action_name": "Tạo yêu cầu giải ngân thủ công (draft)",
+        "description": (
+            "Settlement batch thất bại hoặc payout lỗi, cần tạo manual payout. "
+            "Tiền đang ở settlement pool, chưa đến bank merchant. "
+            "Số tiền lấy từ settlement_ledger.net_settlement_amount."
+        ),
+        "mcp_tool": None,
+        "execution_mode": "draft_only",
+        "preconditions": [
+            "merchant.status = active",
+            "bank_account.verification_status = verified",
+            "settlement_ledger.net_settlement_amount > 0",
+            "Không có payout đang processing/success",
+        ],
+        "evidence_dependencies": [
+            "merchant_profile", "merchant_bank_account",
+            "merchant_settlement_ledger", "merchant_payout",
+            "settlement_batch",
+        ],
+        "expected_result": (
+            "Draft manual payout sẽ được tạo. "
+            "Cần phê duyệt cấp cao trước khi thực hiện chuyển khoản."
+        ),
+        "safety_notes": [
+            "Không tự động thực hiện payout",
+            "Số tiền lấy từ settlement_ledger, không từ merchant",
+            "Cần phê duyệt trước khi thực hiện",
+            "Kiểm tra bank account verified trước khi duyệt",
+            "Kiểm tra duplicate payout risk",
+        ],
+    },
+    "send_unc_email_draft": {
+        "action_name": "Gửi UNC/biên lai chuyển khoản cho merchant (draft)",
+        "description": (
+            "Payout đã thành công nhưng UNC chưa gửi cho merchant. "
+            "Tiền đã ở bank account merchant. Không tạo payout mới."
+        ),
+        "mcp_tool": None,
+        "execution_mode": "draft_only",
+        "preconditions": [
+            "payout.status = success",
+            "bank_transfer_receipt.sent_to_merchant = false",
+        ],
+        "evidence_dependencies": [
+            "merchant_profile", "merchant_payout", "bank_transfer_receipt",
+        ],
+        "expected_result": (
+            "Draft email UNC sẽ được tạo. "
+            "Nhân viên review nội dung trước khi gửi."
+        ),
+        "safety_notes": [
+            "Không tạo payout mới",
+            "Không gửi email thật — chỉ tạo draft",
+        ],
+    },
+    "request_bank_account_correction": {
+        "action_name": "Yêu cầu merchant cập nhật tài khoản ngân hàng",
+        "description": (
+            "Tài khoản ngân hàng merchant không hợp lệ hoặc chưa xác minh. "
+            "Không thể tạo payout cho đến khi bank account verified."
+        ),
+        "mcp_tool": None,
+        "execution_mode": "draft_only",
+        "preconditions": [
+            "bank_account invalid/inactive/pending/name_mismatch",
+        ],
+        "evidence_dependencies": [
+            "merchant_profile", "merchant_bank_account",
+        ],
+        "expected_result": (
+            "Draft yêu cầu cập nhật bank account sẽ được tạo. "
+            "Merchant cần cung cấp thông tin ngân hàng mới."
+        ),
+        "safety_notes": [
+            "Không tự động update bank account",
+            "Không tạo payout khi bank account chưa verified",
+        ],
+    },
+    "manual_settlement_review": {
+        "action_name": "Chuyển Settlement team review thủ công",
+        "description": (
+            "Case settlement phức tạp hoặc evidence không đủ. "
+            "Cần Settlement/Ops team kiểm tra thủ công."
+        ),
+        "mcp_tool": None,
+        "execution_mode": "manual",
+        "preconditions": [],
+        "evidence_dependencies": [
+            "merchant_profile", "merchant_settlement_ledger",
+            "merchant_payout", "settlement_batch",
+        ],
+        "expected_result": (
+            "Case sẽ được chuyển sang Settlement manual review. "
+            "Nhân viên cần kiểm tra toàn bộ evidence và quyết định."
+        ),
+        "safety_notes": [
+            "Không tự động thực hiện payout",
+            "Không tự động update bank account",
+            "Nhân viên cần review toàn bộ evidence",
+        ],
+    },
+    "request_identity_correction": {
+        "action_name": "Yêu cầu bổ sung thông tin định danh Merchant",
+        "description": (
+            "Không tìm thấy merchant khớp với thông tin khách cung cấp trong hệ thống. "
+            "Vì chưa định danh được merchant, agent chưa thể kiểm tra settlement ledger, "
+            "payout, tài khoản nhận tiền hoặc UNC."
+        ),
+        "mcp_tool": None,
+        "execution_mode": "information_request",
+        "preconditions": [],
+        "evidence_dependencies": [],
+        "expected_result": (
+            "Nhân viên yêu cầu merchant cung cấp lại thông tin định danh "
+            "(merchant_id, phone/email, MST, payout_id hoặc batch_id)."
+        ),
+        "safety_notes": [
+            "Không tạo payout",
+            "Không gửi UNC",
+            "Không cập nhật tài khoản ngân hàng",
+            "Không fallback sang merchant khác",
+            "Cần định danh merchant trước khi kiểm tra settlement",
+        ],
+    },
     "wait_sla": {
         "action_name": "Chờ SLA / thời gian xử lý",
         "description": (
@@ -225,6 +351,7 @@ _ACTION_MAP: dict[str, dict[str, Any]] = {
         "safety_notes": [],
     },
 }
+
 
 # ─── Staff Instruction Templates ────────────────────────────────
 
@@ -268,6 +395,43 @@ _STAFF_INSTRUCTIONS: dict[str, str] = {
         "Yêu cầu khách xác nhận lại thông tin định danh: "
         "số điện thoại, email, wallet_id hoặc mã giao dịch. "
         "Không thao tác tài khoản cho đến khi định danh được."
+    ),
+    # ── Merchant settlement staff instructions ──
+    "create_manual_payout_draft": (
+        "Kiểm tra trước khi phê duyệt manual payout:\n"
+        "• Merchant status = active\n"
+        "• Bank account verified\n"
+        "• Số tiền = settlement_ledger.net_settlement_amount\n"
+        "• Không có payout đang processing/success (duplicate risk)\n"
+        "• Tiền đang ở: settlement pool, chưa đến bank merchant\n"
+        "Cần phê duyệt cấp cao trước khi chuyển khoản."
+    ),
+    "send_unc_email_draft": (
+        "Payout đã thành công. KHÔNG tạo payout mới.\n"
+        "• Tiền đã ở: bank account merchant\n"
+        "• Review nội dung UNC/biên lai trước khi gửi cho merchant\n"
+        "• Kiểm tra payout_id, unc_number, receipt_url chính xác"
+    ),
+    "request_bank_account_correction": (
+        "Bank account merchant không hợp lệ hoặc chưa xác minh.\n"
+        "• KHÔNG tạo payout khi bank account chưa verified\n"
+        "• Yêu cầu merchant cập nhật: số tài khoản, tên chủ TK, chi nhánh\n"
+        "• Sau khi merchant update, kiểm tra lại verification status"
+    ),
+    "manual_settlement_review": (
+        "Case settlement cần review thủ công.\n"
+        "• Kiểm tra merchant profile, settlement ledger, payout status, batch status\n"
+        "• Xác định: Tiền đang ở đâu? (settlement pool / bank / merchant)\n"
+        "• Liên hệ bank/settlement team nếu cần\n"
+        "• Escalate Ops/Risk nếu phức tạp"
+    ),
+    "request_identity_correction": (
+        "Chưa tìm thấy merchant trong hệ thống.\n"
+        "• Yêu cầu merchant cung cấp lại merchant_id, số điện thoại/email đăng ký merchant, "
+        "mã số thuế, payout_id hoặc batch_id nếu có\n"
+        "• KHÔNG tạo payout, UNC, hoặc cập nhật bank account\n"
+        "• KHÔNG fallback sang merchant khác\n"
+        "• Cần định danh merchant trước khi kiểm tra settlement"
     ),
     "wait_sla": (
         "Chờ SLA xử lý từ bank/provider. Theo dõi và cập nhật cho khách sau khi có kết quả."
@@ -316,6 +480,13 @@ _EVIDENCE_FIELDS: dict[str, str] = {
     "reconciliation_status": "Dữ liệu đối soát",
     "account_status": "Trạng thái tài khoản",
     "fraud_case": "Dữ liệu fraud/risk",
+    # Merchant settlement evidence
+    "merchant_profile": "Thông tin merchant",
+    "merchant_bank_account": "Tài khoản ngân hàng merchant",
+    "merchant_settlement_ledger": "Sổ settlement ledger",
+    "merchant_payout": "Trạng thái payout merchant",
+    "settlement_batch": "Trạng thái settlement batch",
+    "bank_transfer_receipt": "Biên lai chuyển khoản / UNC",
 }
 
 
@@ -405,6 +576,13 @@ def _compute_evidence_checked_and_missing(
     if selected_workflow == "fraud_account_lock":
         # Fraud workflow expects account_status + fraud_case
         expected_keys = ("account_status", "fraud_case")
+    elif selected_workflow == "merchant_settlement_delay":
+        # Merchant settlement expects settlement-specific evidence
+        expected_keys = (
+            "merchant_profile", "merchant_bank_account",
+            "merchant_settlement_ledger", "merchant_payout",
+            "settlement_batch", "bank_transfer_receipt",
+        )
     else:
         # Transaction workflows expect transaction + wallet_ledger
         expected_keys = ("transaction", "wallet_ledger")
@@ -433,6 +611,69 @@ def _compute_evidence_checked_and_missing(
         if isinstance(acct_data, dict):
             if acct_data.get("withdrawal_enabled") is not None:
                 checked.append("Trạng thái rút tiền")
+
+    # ── Wallet topup sub-evidence: report bank reconciliation details ──
+    if selected_workflow == "wallet_topup":
+        txn_data = eb_dict.get("transaction")
+        if isinstance(txn_data, dict):
+            if txn_data.get("status"):
+                checked.append("Trạng thái giao dịch")
+            if txn_data.get("amount") is not None:
+                checked.append("Số tiền giao dịch")
+        recon_data = eb_dict.get("reconciliation_status")
+        if isinstance(recon_data, dict):
+            if recon_data.get("bank_status"):
+                checked.append("Trạng thái bank")
+            if recon_data.get("money_received_in_master_wallet") is not None:
+                checked.append("Tiền vào master wallet")
+            if recon_data.get("bank_amount") is not None:
+                checked.append("Số tiền bank")
+        wl_data = eb_dict.get("wallet_ledger")
+        if isinstance(wl_data, dict):
+            if wl_data.get("status"):
+                checked.append("Trạng thái wallet ledger")
+        else:
+            if "Wallet Ledger" not in missing:
+                missing.append("Wallet Ledger")
+
+    # ── Merchant settlement sub-evidence ──
+    if selected_workflow == "merchant_settlement_delay":
+        mp = eb_dict.get("merchant_profile")
+        if isinstance(mp, dict):
+            if mp.get("status"):
+                checked.append("Trạng thái merchant")
+            if mp.get("settlement_cycle"):
+                checked.append("Chu kỳ thanh toán")
+        mba = eb_dict.get("merchant_bank_account")
+        if isinstance(mba, dict):
+            if mba.get("verification_status"):
+                checked.append("Trạng thái xác minh tài khoản ngân hàng")
+            if mba.get("is_active") is not None:
+                checked.append("Bank account active")
+        msl = eb_dict.get("merchant_settlement_ledger")
+        if isinstance(msl, dict):
+            if msl.get("net_settlement_amount") is not None:
+                checked.append("Số tiền thanh toán ròng")
+            if msl.get("due_date"):
+                checked.append("Ngày đáo hạn")
+            if msl.get("settlement_date"):
+                checked.append("Ngày settlement")
+        mpay = eb_dict.get("merchant_payout")
+        if isinstance(mpay, dict):
+            if mpay.get("status"):
+                checked.append("Trạng thái payout")
+            if mpay.get("amount") is not None:
+                checked.append("Số tiền payout")
+        sb = eb_dict.get("settlement_batch")
+        if isinstance(sb, dict):
+            if sb.get("status"):
+                checked.append("Trạng thái batch")
+        btr = eb_dict.get("bank_transfer_receipt")
+        if isinstance(btr, dict):
+            if btr.get("unc_number"):
+                checked.append("Số UNC")
+            if btr.get("sent_to_merchant") is not None:
+                checked.append("UNC đã gửi merchant")
 
     return checked, missing
 
@@ -470,6 +711,9 @@ def _determine_resolution_status(
         return "not_supported"
 
     if action_type == "manual_review":
+        return "manual_review_required"
+
+    if action_type == "manual_settlement_review":
         return "manual_review_required"
 
     if action_type == "request_identity_correction":
@@ -571,6 +815,37 @@ def _build_mcp_input(state: dict[str, Any], action_type: str) -> dict[str, Any]:
             "case_id": state.get("case_id", ""),
         }
 
+    # ── Merchant settlement MCP inputs ──
+    elif action_type == "create_manual_payout_draft":
+        merchant_id = ei_dict.get("merchant_id", "")
+        mcp_input = {
+            "merchant_id": merchant_id,
+            "reason": diagnosis or "manual_payout",
+        }
+        if eb is not None:
+            ledger = eb_dict.get("merchant_settlement_ledger")
+            if isinstance(ledger, dict) and ledger.get("net_settlement_amount"):
+                mcp_input["amount"] = ledger["net_settlement_amount"]
+                mcp_input["amount_source"] = "settlement_ledger.net_settlement_amount"
+
+    elif action_type == "send_unc_email_draft":
+        mcp_input = {
+            "merchant_id": ei_dict.get("merchant_id", ""),
+            "reason": diagnosis or "send_unc",
+        }
+
+    elif action_type == "request_bank_account_correction":
+        mcp_input = {
+            "merchant_id": ei_dict.get("merchant_id", ""),
+            "reason": diagnosis or "bank_account_correction",
+        }
+
+    elif action_type == "manual_settlement_review":
+        mcp_input = {
+            "merchant_id": ei_dict.get("merchant_id", ""),
+            "reason": diagnosis or "manual_settlement_review",
+        }
+
     return mcp_input
 
 
@@ -580,6 +855,7 @@ _MONEY_ACTION_TYPES = frozenset({
     "create_refund_request_draft",
     "create_force_success_draft",
     "create_reconciliation_ticket_draft",
+    "create_manual_payout_draft",
 })
 
 
@@ -614,10 +890,14 @@ def _build_amount_verification(state: dict[str, Any]) -> AmountVerification:
         else:
             eb_dict = {}
 
+        # Priority 0: settlement_ledger.net_settlement_amount (merchant settlement)
+        msl = eb_dict.get("merchant_settlement_ledger")
+        if isinstance(msl, dict) and msl.get("net_settlement_amount"):
+            trusted = msl["net_settlement_amount"]
+            trusted_source = "settlement_ledger.net_settlement_amount"
         # Priority 1: wallet_ledger.debit_amount
-        wl = eb_dict.get("wallet_ledger")
-        if isinstance(wl, dict) and wl.get("debit_amount"):
-            trusted = wl["debit_amount"]
+        elif isinstance(eb_dict.get("wallet_ledger"), dict) and eb_dict["wallet_ledger"].get("debit_amount"):
+            trusted = eb_dict["wallet_ledger"]["debit_amount"]
             trusted_source = "wallet_ledger.debit_amount"
         # Priority 2: transaction.amount
         elif isinstance(eb_dict.get("transaction"), dict):

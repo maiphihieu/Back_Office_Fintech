@@ -2,11 +2,14 @@
 
 Server name: fintech-backoffice-mcp-server
 
-Exposes 17 tools:
-  Read-only (11):  get_transaction, get_reconciliation_status, get_wallet_ledger,
+Exposes 23 tools:
+  Read-only (17):  get_transaction, get_reconciliation_status, get_wallet_ledger,
                    get_refund_status, get_train_provider_status, get_utility_bill_status,
                    get_account_status, get_fraud_case,
-                   get_user_by_phone, get_user_by_email, get_user_by_wallet_id
+                   get_user_by_phone, get_user_by_email, get_user_by_wallet_id,
+                   get_merchant_profile, get_merchant_bank_account,
+                   get_settlement_batch, get_merchant_settlement_ledger,
+                   get_merchant_payout, get_bank_transfer_receipt
   Draft-only (6):  create_refund_request_draft, create_reconciliation_ticket_draft,
                    create_customer_response_draft, create_force_success_draft,
                    create_unlock_account_draft, create_request_documents_response_draft
@@ -30,9 +33,15 @@ from fintech_agent.mcp_server.handlers import (
     handle_create_request_documents_response_draft,
     handle_create_unlock_account_draft,
     handle_get_account_status,
+    handle_get_bank_transfer_receipt,
     handle_get_fraud_case,
+    handle_get_merchant_bank_account,
+    handle_get_merchant_payout,
+    handle_get_merchant_profile,
+    handle_get_merchant_settlement_ledger,
     handle_get_reconciliation_status,
     handle_get_refund_status,
+    handle_get_settlement_batch,
     handle_get_train_provider_status,
     handle_get_transaction,
     handle_get_user_by_email,
@@ -415,5 +424,133 @@ async def create_request_documents_response_draft(
         user_id=user_id,
         reason=reason,
         evidence_summary=evidence_summary,
+    )
+    return json.dumps(result, ensure_ascii=False, default=str)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Merchant settlement read-only tools (Case 3)
+# ═══════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+async def get_merchant_profile(
+    merchant_id: str | None = None,
+    phone: str | None = None,
+    email: str | None = None,
+    tax_code: str | None = None,
+) -> str:
+    """Fetch merchant profile by identity.
+
+    Lookup priority: merchant_id > phone > email > tax_code.
+    Returns merchant data including name, status, settlement_cycle.
+    Read-only — does not modify any data.
+
+    Args:
+        merchant_id: The merchant identifier (e.g. MRC_001_BATCH_FAIL)
+        phone: Merchant phone number
+        email: Merchant contact email
+        tax_code: Merchant tax code (Mã số thuế)
+    """
+    result = await handle_get_merchant_profile(
+        merchant_id=merchant_id, phone=phone, email=email, tax_code=tax_code,
+    )
+    return json.dumps(result, ensure_ascii=False, default=str)
+
+
+@mcp.tool()
+async def get_merchant_bank_account(merchant_id: str) -> str:
+    """Fetch merchant bank account details.
+
+    Returns bank account data including account_number, bank_name,
+    verification_status, is_active. Read-only.
+
+    Args:
+        merchant_id: The merchant identifier
+    """
+    result = await handle_get_merchant_bank_account(merchant_id)
+    return json.dumps(result, ensure_ascii=False, default=str)
+
+
+@mcp.tool()
+async def get_settlement_batch(
+    settlement_date: str | None = None,
+    cycle: str = "D+1",
+    batch_id: str | None = None,
+) -> str:
+    """Fetch settlement batch information.
+
+    Lookup priority: batch_id > settlement_date + cycle.
+    Returns batch status, total_amount, failure_reason. Read-only.
+
+    Args:
+        settlement_date: Settlement date (YYYY-MM-DD)
+        cycle: Settlement cycle (D+1, D+2). Default: D+1
+        batch_id: Direct batch identifier
+    """
+    result = await handle_get_settlement_batch(
+        settlement_date=settlement_date, cycle=cycle, batch_id=batch_id,
+    )
+    return json.dumps(result, ensure_ascii=False, default=str)
+
+
+@mcp.tool()
+async def get_merchant_settlement_ledger(
+    merchant_id: str,
+    settlement_date: str | None = None,
+) -> str:
+    """Fetch merchant settlement ledger (breakdown of amounts).
+
+    Returns gross_amount, fee_amount, refund_amount, chargeback_amount,
+    net_settlement_amount. Read-only.
+
+    Args:
+        merchant_id: The merchant identifier
+        settlement_date: Optional settlement date (YYYY-MM-DD). If omitted, returns latest.
+    """
+    result = await handle_get_merchant_settlement_ledger(
+        merchant_id=merchant_id, settlement_date=settlement_date,
+    )
+    return json.dumps(result, ensure_ascii=False, default=str)
+
+
+@mcp.tool()
+async def get_merchant_payout(
+    merchant_id: str,
+    settlement_date: str | None = None,
+    payout_id: str | None = None,
+) -> str:
+    """Fetch merchant payout details.
+
+    Lookup priority: payout_id > merchant_id + settlement_date > latest.
+    Returns payout status, amount, bank_transfer_ref, failure_reason. Read-only.
+
+    Args:
+        merchant_id: The merchant identifier
+        settlement_date: Optional settlement date (YYYY-MM-DD)
+        payout_id: Direct payout identifier
+    """
+    result = await handle_get_merchant_payout(
+        merchant_id=merchant_id, settlement_date=settlement_date, payout_id=payout_id,
+    )
+    return json.dumps(result, ensure_ascii=False, default=str)
+
+
+@mcp.tool()
+async def get_bnak_transfer_receipt(
+    bank_transfer_ref: str | None = None,
+    payout_id: str | None = None,
+) -> str:
+    """Fetch bank transfer receipt (UNC confirmation).
+
+    Lookup priority: bank_transfer_ref > payout_id.
+    Returns bank_status, unc_number, receipt_url. Read-only.
+
+    Args:
+        bank_transfer_ref: Bank transfer reference number
+        payout_id: Payout identifier to look up receipt for
+    """
+    result = await handle_get_bank_transfer_receipt(
+        bank_transfer_ref=bank_transfer_ref, payout_id=payout_id,
     )
     return json.dumps(result, ensure_ascii=False, default=str)

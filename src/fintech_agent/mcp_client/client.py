@@ -59,9 +59,15 @@ class FintechMCPClient:
                 handle_create_request_documents_response_draft,
                 handle_create_unlock_account_draft,
                 handle_get_account_status,
+                handle_get_bank_transfer_receipt,
                 handle_get_fraud_case,
+                handle_get_merchant_bank_account,
+                handle_get_merchant_payout,
+                handle_get_merchant_profile,
+                handle_get_merchant_settlement_ledger,
                 handle_get_reconciliation_status,
                 handle_get_refund_status,
+                handle_get_settlement_batch,
                 handle_get_train_provider_status,
                 handle_get_transaction,
                 handle_get_user_by_email,
@@ -89,6 +95,13 @@ class FintechMCPClient:
                 "create_force_success_draft": handle_create_force_success_draft,
                 "create_unlock_account_draft": handle_create_unlock_account_draft,
                 "create_request_documents_response_draft": handle_create_request_documents_response_draft,
+                # Merchant settlement read-only tools (Case 3)
+                "get_merchant_profile": handle_get_merchant_profile,
+                "get_merchant_bank_account": handle_get_merchant_bank_account,
+                "get_settlement_batch": handle_get_settlement_batch,
+                "get_merchant_settlement_ledger": handle_get_merchant_settlement_ledger,
+                "get_merchant_payout": handle_get_merchant_payout,
+                "get_bank_transfer_receipt": handle_get_bank_transfer_receipt,
             }
         return self._handler_map
 

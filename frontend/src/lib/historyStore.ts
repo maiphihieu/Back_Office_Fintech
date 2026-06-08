@@ -34,6 +34,7 @@ export function generateTitle(complaint: string | null): string {
 /** Get emoji icon for a service type. */
 export function getServiceIcon(serviceType?: string | null, workflow?: string | null): string {
   const key = serviceType || workflow || '';
+  if (key.includes('merchant') || key.includes('settlement')) return '🏪';
   if (key.includes('train')) return '🚆';
   if (key.includes('electricity') || key.includes('electric') || key.includes('điện')) return '💡';
   if (key.includes('water') || key.includes('nước')) return '💧';

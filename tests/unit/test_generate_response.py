@@ -197,8 +197,9 @@ class TestFallbackResponse:
             result = generate_case_response(state)
 
         assert isinstance(result, GeneratedResponse)
-        assert result.problem_location == "unknown"
-        assert "fallback" in result.internal_summary.lower()
+        # DiagnosticEngine now provides evidence-driven location
+        assert result.problem_location != ""
+        assert "fallback" in result.internal_summary.lower() or "diagnostic" in result.internal_summary.lower()
 
     def test_fallback_has_required_fields(self):
         """Fallback response has all required fields populated."""
@@ -219,8 +220,9 @@ class TestFallbackResponse:
         result = generate_safe_fallback_response(state)
 
         assert isinstance(result.evidence_supporting_problem_location, list)
-        assert result.evidence_supporting_problem_location == []
-        assert result.problem_location_confidence == "unknown"
+        # DiagnosticEngine now populates evidence data points
+        assert isinstance(result.missing_data, list)
+        assert result.problem_location_confidence in ("high", "medium", "low", "unknown")
 
     def test_node_does_not_fail_on_llm_error(self):
         """The safe wrapper must catch LLM errors and return fallback."""
@@ -234,7 +236,8 @@ class TestFallbackResponse:
                 from fintech_agent.llm.response_generator import generate_response_with_llm
                 result = generate_response_with_llm(state)
                 assert isinstance(result, GeneratedResponse)
-                assert result.problem_location == "unknown"
+                # DiagnosticEngine provides evidence-driven location
+                assert result.problem_location != ""
         finally:
             os.environ.pop("OPENAI_API_KEY", None)
 

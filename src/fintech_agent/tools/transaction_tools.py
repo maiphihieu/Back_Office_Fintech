@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from fintech_agent.database.repository_factory import get_transaction_repo
+
+if TYPE_CHECKING:
+    from fintech_agent.repositories.transaction_repository import TransactionRepository
 from fintech_agent.repositories.base import RecordNotFound
 from fintech_agent.schemas.evidence import Transaction
 from fintech_agent.tools.tool_errors import ToolDataNotFound, ToolTimeout

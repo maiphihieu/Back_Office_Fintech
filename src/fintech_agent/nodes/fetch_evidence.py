@@ -15,10 +15,16 @@ from fintech_agent.mcp_client.client import get_mcp_client
 from fintech_agent.schemas.enums import AuditEventType, CaseStatus
 from fintech_agent.schemas.evidence import (
     AccountStatus,
+    BankTransferReceipt,
     EvidenceBundle,
     FraudCase,
+    MerchantBankAccount,
+    MerchantPayout,
+    MerchantProfile,
+    MerchantSettlementLedger,
     ReconciliationStatus,
     RefundStatus,
+    SettlementBatch,
     TrainProviderStatus,
     Transaction,
     UtilityProviderStatus,
@@ -63,6 +69,12 @@ def fetch_evidence(state: AgentState, audit: AuditLogger | None = None) -> Agent
     svc_type = extracted.service_type if extracted else None
     if svc_type == "account_security":
         return _fetch_fraud_evidence(state, extracted, mcp, audit, case_id, corr_id, errors, audit_ids)
+
+    # ── Merchant settlement workflow — merchant data sources ──
+    if svc_type == "merchant_settlement":
+        return _fetch_merchant_settlement_evidence(
+            state, extracted, mcp, audit, case_id, corr_id, errors, audit_ids,
+        )
 
     # ── Transaction-based workflows ──────────────────────────
     if not extracted or not extracted.transaction_id:
@@ -381,6 +393,208 @@ def _fetch_fraud_evidence(
         "tool_results": tool_results,
         "user_id": user_id,
         "selected_workflow": "fraud_account_lock",
+        "errors": errors,
+        "status": CaseStatus.FETCHING_EVIDENCE,
+        "audit_event_ids": audit_ids,
+    }
+
+
+def _fetch_merchant_settlement_evidence(
+    state: AgentState,
+    extracted,
+    mcp,
+    audit: AuditLogger | None,
+    case_id: str,
+    corr_id: str | None,
+    errors: list[str],
+    audit_ids: list[str],
+) -> AgentState:
+    """Fetch merchant settlement evidence via MCP tools.
+
+    Identity resolution priority:
+    1. Explicit merchant_id from complaint
+    2. Phone number lookup
+    3. Email lookup
+    4. Tax code lookup
+
+    If merchant not found, returns empty bundle (rule engine -> manual_review).
+    SAFETY: Does NOT use fake/default merchant.
+    """
+    tool_results: dict = {}
+    merchant_id: str | None = getattr(extracted, "merchant_id", None) if extracted else None
+
+    if audit:
+        ev = audit.log_event(
+            case_id, AuditEventType.EVIDENCE_FETCH_STARTED,
+            details={"workflow": "merchant_settlement_delay", "merchant_id": merchant_id},
+            correlation_id=corr_id,
+        )
+        audit_ids.append(ev.event_id)
+
+    # ── Step 1: Resolve merchant profile ──────────────────
+    merchant_profile: MerchantProfile | None = None
+    lookup_args: dict = {}
+
+    if merchant_id:
+        lookup_args = {"merchant_id": merchant_id}
+    elif extracted:
+        phone = getattr(extracted, "phone", None)
+        email = getattr(extracted, "email", None)
+        tax_code = getattr(extracted, "tax_code", None)
+        if phone:
+            lookup_args = {"phone": phone}
+        elif email:
+            lookup_args = {"email": email}
+        elif tax_code:
+            lookup_args = {"tax_code": tax_code}
+
+    if lookup_args:
+        try:
+            result = mcp.call_tool_sync("get_merchant_profile", lookup_args)
+            merchant_profile = _parse_or_none(MerchantProfile, result)
+            if merchant_profile:
+                merchant_id = merchant_profile.merchant_id
+                tool_results["merchant_profile"] = "ok"
+                _log_tool(audit, case_id, "get_merchant_profile", True,
+                          f"found={merchant_id}", audit_ids, corr_id)
+            else:
+                tool_results["merchant_profile"] = "not_found"
+                _log_tool(audit, case_id, "get_merchant_profile", False,
+                          "not found", audit_ids, corr_id)
+        except Exception as e:
+            errors.append(f"merchant_profile: {e}")
+            tool_results["merchant_profile"] = "failed"
+            _log_tool(audit, case_id, "get_merchant_profile", False,
+                      str(e), audit_ids, corr_id)
+    else:
+        tool_results["merchant_profile"] = "no_identity"
+        errors.append("merchant_identity_not_provided")
+
+    # If merchant not found, return empty bundle — rule engine will handle
+    if not merchant_id:
+        return {
+            "evidence_bundle": EvidenceBundle(),
+            "tool_results": tool_results,
+            "selected_workflow": "merchant_settlement_delay",
+            "errors": errors,
+            "status": CaseStatus.FETCHING_EVIDENCE,
+            "audit_event_ids": audit_ids,
+        }
+
+    # ── Step 2: Fetch merchant bank account ───────────────
+    bank_account: MerchantBankAccount | None = None
+    try:
+        result = mcp.call_tool_sync("get_merchant_bank_account", {"merchant_id": merchant_id})
+        bank_account = _parse_or_none(MerchantBankAccount, result)
+        tool_results["merchant_bank_account"] = "ok" if bank_account else "not_found"
+        _log_tool(audit, case_id, "get_merchant_bank_account",
+                  bank_account is not None, "found" if bank_account else "not_found",
+                  audit_ids, corr_id)
+    except Exception as e:
+        errors.append(f"merchant_bank_account: {e}")
+        tool_results["merchant_bank_account"] = "failed"
+        _log_tool(audit, case_id, "get_merchant_bank_account", False, str(e), audit_ids, corr_id)
+
+    # ── Step 3: Fetch settlement ledger ───────────────────
+    ledger: MerchantSettlementLedger | None = None
+    ledger_args: dict = {"merchant_id": merchant_id}
+    settlement_date = getattr(extracted, "settlement_date", None) if extracted else None
+    if settlement_date:
+        ledger_args["settlement_date"] = settlement_date
+    try:
+        result = mcp.call_tool_sync("get_merchant_settlement_ledger", ledger_args)
+        ledger = _parse_or_none(MerchantSettlementLedger, result)
+        tool_results["merchant_settlement_ledger"] = "ok" if ledger else "not_found"
+        _log_tool(audit, case_id, "get_merchant_settlement_ledger",
+                  ledger is not None, "found" if ledger else "not_found",
+                  audit_ids, corr_id)
+    except Exception as e:
+        errors.append(f"merchant_settlement_ledger: {e}")
+        tool_results["merchant_settlement_ledger"] = "failed"
+        _log_tool(audit, case_id, "get_merchant_settlement_ledger", False, str(e), audit_ids, corr_id)
+
+    # ── Step 4: Fetch merchant payout ─────────────────────
+    payout: MerchantPayout | None = None
+    payout_args: dict = {"merchant_id": merchant_id}
+    payout_id = getattr(extracted, "payout_id", None) if extracted else None
+    if payout_id:
+        payout_args["payout_id"] = payout_id
+    elif settlement_date:
+        payout_args["settlement_date"] = settlement_date
+    try:
+        result = mcp.call_tool_sync("get_merchant_payout", payout_args)
+        payout = _parse_or_none(MerchantPayout, result)
+        tool_results["merchant_payout"] = "ok" if payout else "not_found"
+        _log_tool(audit, case_id, "get_merchant_payout",
+                  payout is not None, "found" if payout else "not_found",
+                  audit_ids, corr_id)
+    except Exception as e:
+        errors.append(f"merchant_payout: {e}")
+        tool_results["merchant_payout"] = "failed"
+        _log_tool(audit, case_id, "get_merchant_payout", False, str(e), audit_ids, corr_id)
+
+    # ── Step 5: Fetch settlement batch ───────────────────
+    batch: SettlementBatch | None = None
+    batch_args: dict = {}
+    batch_id = getattr(extracted, "batch_id", None) if extracted else None
+    if batch_id:
+        batch_args = {"batch_id": batch_id}
+    elif settlement_date:
+        settlement_cycle = getattr(extracted, "settlement_cycle", "D+1") if extracted else "D+1"
+        batch_args = {"settlement_date": settlement_date, "cycle": settlement_cycle or "D+1"}
+    elif ledger and ledger.settlement_date:
+        # Use ledger's settlement date to find the batch
+        settlement_cycle = getattr(extracted, "settlement_cycle", "D+1") if extracted else "D+1"
+        batch_args = {"settlement_date": ledger.settlement_date, "cycle": settlement_cycle or "D+1"}
+
+    if batch_args:
+        try:
+            result = mcp.call_tool_sync("get_settlement_batch", batch_args)
+            batch = _parse_or_none(SettlementBatch, result)
+            tool_results["settlement_batch"] = "ok" if batch else "not_found"
+            _log_tool(audit, case_id, "get_settlement_batch",
+                      batch is not None, "found" if batch else "not_found",
+                      audit_ids, corr_id)
+        except Exception as e:
+            errors.append(f"settlement_batch: {e}")
+            tool_results["settlement_batch"] = "failed"
+            _log_tool(audit, case_id, "get_settlement_batch", False, str(e), audit_ids, corr_id)
+
+    # ── Step 6: Fetch bank transfer receipt ──────────────
+    receipt: BankTransferReceipt | None = None
+    receipt_args: dict = {}
+    if payout and payout.bank_transfer_ref:
+        receipt_args = {"bank_transfer_ref": payout.bank_transfer_ref}
+    elif payout:
+        receipt_args = {"payout_id": payout.payout_id}
+
+    if receipt_args:
+        try:
+            result = mcp.call_tool_sync("get_bank_transfer_receipt", receipt_args)
+            receipt = _parse_or_none(BankTransferReceipt, result)
+            tool_results["bank_transfer_receipt"] = "ok" if receipt else "not_found"
+            _log_tool(audit, case_id, "get_bank_transfer_receipt",
+                      receipt is not None, "found" if receipt else "not_found",
+                      audit_ids, corr_id)
+        except Exception as e:
+            errors.append(f"bank_transfer_receipt: {e}")
+            tool_results["bank_transfer_receipt"] = "failed"
+            _log_tool(audit, case_id, "get_bank_transfer_receipt", False, str(e), audit_ids, corr_id)
+
+    # ── Assemble evidence bundle ───────────────────────
+    evidence = EvidenceBundle(
+        merchant_profile=merchant_profile,
+        merchant_bank_account=bank_account,
+        merchant_settlement_ledger=ledger,
+        merchant_payout=payout,
+        settlement_batch=batch,
+        bank_transfer_receipt=receipt,
+    )
+
+    return {
+        "evidence_bundle": evidence,
+        "tool_results": tool_results,
+        "selected_workflow": "merchant_settlement_delay",
         "errors": errors,
         "status": CaseStatus.FETCHING_EVIDENCE,
         "audit_event_ids": audit_ids,

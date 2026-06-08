@@ -16,6 +16,14 @@ export interface ExtractedInfo {
   phone?: string | null;
   email?: string | null;
   wallet_id?: string | null;
+  /* ── Merchant settlement fields ── */
+  merchant_id?: string | null;
+  merchant_name?: string | null;
+  tax_code?: string | null;
+  settlement_cycle?: string | null;
+  settlement_date?: string | null;
+  payout_id?: string | null;
+  batch_id?: string | null;
 }
 
 export interface EvidenceBundle {
@@ -45,6 +53,13 @@ export interface EvidenceBundle {
     device_events?: Array<Record<string, unknown>>;
     recommended_decision?: string;
   } | null;
+  /* ── Merchant settlement evidence ── */
+  merchant_profile?: Record<string, unknown> | null;
+  merchant_bank_account?: Record<string, unknown> | null;
+  merchant_settlement_ledger?: Record<string, unknown> | null;
+  settlement_batch?: Record<string, unknown> | null;
+  merchant_payout?: Record<string, unknown> | null;
+  bank_transfer_receipt?: Record<string, unknown> | null;
 }
 
 export interface Conflict {
@@ -72,6 +87,7 @@ export interface GeneratedResponse {
   recommended_next_step: string;
   customer_reply_draft: string;
   safety_notes: string[];
+  missing_data?: string[];
   debug?: ResponseDebug | null;
 }
 

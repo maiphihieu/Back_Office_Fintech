@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from fintech_agent.database.repository_factory import get_refund_repo
+
+if TYPE_CHECKING:
+    from fintech_agent.repositories.refund_repository import RefundRepository
 from fintech_agent.repositories.base import RecordNotFound
 from fintech_agent.schemas.evidence import RefundStatus
 from fintech_agent.tools.tool_errors import ToolDataNotFound

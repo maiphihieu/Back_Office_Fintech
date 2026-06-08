@@ -1,0 +1,577 @@
+# Customer Response Policy Configuration
+#
+# This file drives ALL workflow-specific customer chat behavior.
+# No guidance strings, forbidden terms, or safe_missing_info lists
+# should be hard-coded in Python code. Read from here.
+#
+# Structure:
+#   workflows.<workflow_name>:
+#     safe_explanation_scope: what the agent may explain publicly
+#     safe_missing_info: fields the agent may ask about
+#     forbidden_terms: terms that MUST NOT appear in customer responses
+#     guidance_template: what to tell customer when they ask "what do I provide?"
+#     status_template: what to tell customer when they ask about case progress
+#     safety_reminder: appended to guidance to warn about sensitive info
+#
+#   global_forbidden_terms: terms forbidden across ALL workflows
+#   global_safety_reminder: default safety reminder appended to all guidance
+#   sensitive_info_warning: response when customer sends PIN/OTP/password
+#   no_case_greeting: response when no active case exists
+
+global_forbidden_terms:
+  - force-success
+  - force_success
+  - master wallet
+  - master_wallet
+  - ledger
+  - reconciliation
+  - reconciliation_table
+  - approval_packet
+  - action_draft
+  - rule_id
+  - risk_score
+  - fraud_status
+  - fraud_signal
+  - device_signal
+  - pin_hash
+  - internal_summary
+  - mcp_tool
+  - tool_result
+  - evidence_bundle
+  - draft_output
+  - audit_event
+  - settlement_batch
+  - merchant_payout_internal
+
+global_safety_reminder: >-
+  Vui lòng không gửi mã PIN, OTP, mật khẩu hoặc số thẻ đầy đủ trong khung chat.
+
+sensitive_info_warning: >-
+  ⚠️ Vui lòng KHÔNG gửi mã PIN, OTP, mật khẩu hoặc số thẻ đầy đủ qua chat.
+  Chúng tôi không bao giờ yêu cầu các thông tin này.
+  Nếu bạn đã gửi nhầm, vui lòng đổi mật khẩu/PIN ngay.
+
+no_case_greeting: >-
+  Xin chào! Bạn cần hỗ trợ về vấn đề gì?
+  Vui lòng mô tả ngắn gọn vấn đề bạn đang gặp phải.
+
+status_default_template: >-
+  Yêu cầu của bạn đang được bộ phận phụ trách kiểm tra.
+  Chúng tôi sẽ cập nhật kết quả trong thời gian sớm nhất.
+
+generic_guidance_template: >-
+  Vui lòng mô tả thêm chi tiết vấn đề bạn đang gặp
+  để chúng tôi có thể hỗ trợ tốt hơn.
+
+generic_fallback_response: >-
+  Chúng tôi đã ghi nhận thông tin của bạn.
+  Bộ phận hỗ trợ sẽ kiểm tra và phản hồi trong thời gian sớm nhất.
+
+# Neutral diagnosis vocabulary used when the workflow is unknown.
+# Intentionally generic — no wallet/ticket/provider-specific wording.
+default_diagnosis:
+  evidence_focus:
+    - payment_status
+  situations:
+    payment_pending:
+      issue_location: bước xử lý giao dịch
+      cause: >-
+        Giao dịch của bạn đang trong quá trình xử lý.
+        Hệ thống đang kiểm tra trạng thái.
+      facts:
+        - giao dịch đang được xử lý
+    payment_ok_delivery_pending:
+      issue_location: bước xử lý sau khi thanh toán được ghi nhận
+      cause: >-
+        Thanh toán đã được ghi nhận. Bộ phận phụ trách đang kiểm tra
+        và xử lý phần còn lại theo quy trình.
+      facts:
+        - thanh toán đã được ghi nhận
+    payment_failed:
+      issue_location: lỗi phát sinh trong quá trình xử lý
+      cause: >-
+        Giao dịch gặp lỗi trong quá trình xử lý.
+        Nếu đã bị trừ tiền, khoản tiền sẽ được xử lý theo quy trình.
+      facts:
+        - giao dịch gặp lỗi
+    completed:
+      issue_location: ""
+      cause: >-
+        Giao dịch đã được ghi nhận hoàn tất trong hệ thống.
+      facts:
+        - giao dịch đã hoàn tất
+    checking:
+      issue_location: đang được bộ phận phụ trách xác định
+      cause: ""
+      facts: []
+
+workflows:
+  wallet_topup:
+    safe_explanation_scope:
+      - bank_wallet_status
+      - wallet_credit_status
+      - transaction_time
+      - transaction_amount
+    allowed_public_topics:
+      - bank_payment_status
+      - wallet_credit_status
+    evidence_focus:
+      - payment_status
+      - bank_processing_status
+      - wallet_credit_status
+    safe_missing_info:
+      - transaction_id
+      - transaction_time
+      - amount
+      - bank_name
+      - bank_reference
+    forbidden_terms:
+      - force-success
+      - master wallet
+      - ledger
+      - reconciliation
+    # Workflow-scoped diagnosis vocabulary. The mapper picks ONE situation
+    # based on evidence; the composer turns the fragment into the final reply.
+    # Downstream = wallet credit step for this workflow.
+    diagnosis:
+      downstream_pending_keys:
+        wallet_status:
+          - not_received
+      downstream_complete_keys:
+        wallet_status:
+          - received
+      situations:
+        payment_pending:
+          issue_location: bước xử lý giao dịch nạp tiền
+          cause: >-
+            Giao dịch nạp tiền của bạn đang được xử lý.
+            Hệ thống đang xác nhận trạng thái với ngân hàng.
+          facts:
+            - giao dịch nạp tiền đang được xử lý
+        payment_ok_delivery_pending:
+          issue_location: bước cập nhật số dư vào ví sau khi ngân hàng đã xử lý
+          cause: >-
+            Ngân hàng đã xác nhận giao dịch nhưng số dư chưa được cập nhật vào ví.
+            Đây thường là độ trễ ở bước cập nhật ví và đang được xử lý theo quy trình.
+          facts:
+            - ngân hàng đã xác nhận thanh toán
+            - ví chưa cập nhật số dư
+        payment_failed:
+          issue_location: lỗi phát sinh phía ngân hàng
+          cause: >-
+            Giao dịch phía ngân hàng gặp lỗi.
+            Nếu tài khoản đã bị trừ tiền, khoản tiền sẽ được hoàn theo quy trình.
+          facts:
+            - giao dịch phía ngân hàng gặp lỗi
+        completed:
+          issue_location: ""
+          cause: >-
+            Ngân hàng đã xác nhận và ví đã nhận tiền.
+          facts:
+            - ví đã nhận tiền
+        checking:
+          issue_location: đang được bộ phận phụ trách xác định
+          cause: ""
+          facts: []
+    guidance_template: >-
+      Bạn có thể xem mã giao dịch trong mục Lịch sử giao dịch của ứng dụng ví.
+      Nếu chưa tìm thấy, bạn có thể gửi:
+      thời gian giao dịch gần đúng, số tiền, ngân hàng đã trừ tiền,
+      hoặc mã tham chiếu ngân hàng trên biên lai.
+    status_template: >-
+      Chúng tôi đang kiểm tra giao dịch nạp ví của bạn.
+      Nếu ngân hàng đã trừ tiền, bộ phận kỹ thuật sẽ đối soát
+      và cập nhật kết quả sớm nhất.
+    safety_reminder: >-
+      Vui lòng không gửi mã PIN, OTP hoặc mật khẩu.
+
+  fraud_account_lock:
+    safe_explanation_scope:
+      - account_verification_needed
+      - customer_safe_documents
+      - account_status_public
+    allowed_public_topics:
+      - account_verification
+      - safe_customer_information
+    evidence_focus:
+      - account_status
+      - safe_verification_need
+    # Diagnosis is driven by account_status (status_field mode), NOT by
+    # payment/bank evidence. NEVER expose risk_score/fraud_status/device signals.
+    diagnosis:
+      status_field: account_status
+      status_map:
+        under_review: account_verification
+        locked: account_verification
+        restricted: account_verification
+        active: account_active
+      situations:
+        account_verification:
+          issue_location: bước xác minh an toàn tài khoản
+          cause: >-
+            Tài khoản của bạn đang được bộ phận bảo mật xác minh
+            để đảm bảo an toàn. Quá trình này cần một số thông tin xác minh từ bạn.
+          facts:
+            - tài khoản đang được xác minh
+        account_active:
+          issue_location: ""
+          cause: >-
+            Tài khoản của bạn hiện đang hoạt động bình thường.
+          facts:
+            - tài khoản đang hoạt động bình thường
+        checking:
+          issue_location: bước xác minh an toàn tài khoản
+          cause: >-
+            Bộ phận bảo mật đang kiểm tra thông tin tài khoản của bạn.
+          facts: []
+    safe_missing_info:
+      - time_locked
+      - screenshot
+      - recent_activity
+      - device_change_context
+      - last_transaction_before_lock
+    forbidden_terms:
+      - risk_score
+      - fraud_status
+      - device_signal
+      - fraud_rules
+      - fraud_model
+    guidance_template: >-
+      Để bộ phận bảo mật kiểm tra nhanh hơn, bạn có thể cung cấp:
+      thời điểm phát hiện tài khoản bị khóa,
+      ảnh chụp màn hình thông báo lỗi,
+      giao dịch gần nhất trước khi bị khóa,
+      thiết bị đang dùng để đăng nhập,
+      và mô tả ngắn nếu gần đây bạn đổi thiết bị hoặc SIM.
+    status_template: >-
+      Bộ phận bảo mật đang xác minh thông tin tài khoản của bạn.
+      Quá trình này cần thời gian để đảm bảo an toàn cho tài khoản.
+    speedup_template: >-
+      Chúng tôi hiểu bạn muốn xử lý nhanh.
+      Bộ phận bảo mật cần xác minh thông tin trước khi cập nhật trạng thái.
+      Để đẩy nhanh quá trình, bạn có thể cung cấp:
+      thời điểm phát hiện bị khóa, giao dịch gần nhất, thiết bị đang dùng.
+    safety_reminder: >-
+      Vui lòng không gửi mã PIN, OTP hoặc mật khẩu.
+
+  train_ticket:
+    safe_explanation_scope:
+      - ticket_booking_status
+      - payment_status
+      - refund_eligibility
+    allowed_public_topics:
+      - payment_status
+      - ticket_issuing_status
+      - provider_status
+    evidence_focus:
+      - payment_status
+      - ticket_issuing_status
+      - provider_status
+    safe_missing_info:
+      - transaction_id
+      - order_id
+      - booking_time
+      - amount
+      - route_info
+      - departure_date
+    # train_ticket must NEVER use wallet-balance wording. These terms are
+    # rejected by the output guardrail unless the diagnosis is wallet-related.
+    forbidden_terms:
+      - wallet balance
+      - số dư ví
+      - ví cập nhật số dư
+      - cập nhật số dư
+      - kiểm tra lại số dư
+      - cập nhật vào ví
+      - force-success
+      - ledger
+      - reconciliation
+    # Downstream = ticket issuing / provider step (NOT wallet credit).
+    diagnosis:
+      downstream_pending_keys:
+        ticket_status:
+          - not_issued
+          - pending
+          - failed
+        provider_status:
+          - not_confirmed
+          - pending
+          - failed
+      downstream_complete_keys:
+        ticket_status:
+          - issued
+        provider_status:
+          - confirmed
+      situations:
+        payment_pending:
+          issue_location: bước xử lý thanh toán vé
+          cause: >-
+            Thanh toán vé của bạn đang được xử lý.
+            Hệ thống đang xác nhận trạng thái với nhà cung cấp dịch vụ vé.
+          facts:
+            - thanh toán vé đang được xử lý
+        payment_ok_delivery_pending:
+          issue_location: bước phát hành vé từ nhà cung cấp sau khi thanh toán được ghi nhận
+          cause: >-
+            Thanh toán của bạn đã được ghi nhận nhưng vé chưa được phát hành
+            từ nhà cung cấp. Bộ phận phụ trách đang phối hợp với nhà cung cấp
+            để phát hành hoặc đối soát vé.
+          facts:
+            - thanh toán đã được ghi nhận
+            - vé chưa được phát hành từ nhà cung cấp
+        payment_failed:
+          issue_location: lỗi phát sinh trong quá trình thanh toán vé
+          cause: >-
+            Thanh toán vé gặp lỗi trong quá trình xử lý.
+            Nếu đã bị trừ tiền, khoản tiền sẽ được hoàn theo quy trình.
+          facts:
+            - thanh toán vé gặp lỗi
+        completed:
+          issue_location: ""
+          cause: >-
+            Vé của bạn đã được phát hành thành công từ nhà cung cấp.
+          facts:
+            - vé đã được phát hành
+        checking:
+          issue_location: bước kiểm tra trạng thái vé với nhà cung cấp
+          cause: ""
+          facts: []
+    guidance_template: >-
+      Để kiểm tra, bạn có thể cung cấp:
+      mã giao dịch hoặc mã đơn hàng,
+      thời gian đặt vé gần đúng, số tiền thanh toán,
+      tuyến đường và ngày khởi hành.
+    status_template: >-
+      Chúng tôi đang kiểm tra giao dịch đặt vé của bạn.
+      Kết quả sẽ được cập nhật sớm nhất.
+    safety_reminder: >-
+      Vui lòng không gửi mã PIN, OTP hoặc mật khẩu.
+
+  utility_bill:
+    safe_explanation_scope:
+      - bill_payment_status
+      - provider_confirmation
+    allowed_public_topics:
+      - payment_status
+      - provider_bill_status
+    evidence_focus:
+      - payment_status
+      - provider_bill_status
+    safe_missing_info:
+      - bill_code
+      - customer_code
+      - provider_name
+      - payment_time
+      - amount
+    forbidden_terms:
+      - wallet balance
+      - số dư ví
+      - kiểm tra lại số dư
+      - cập nhật vào ví
+      - force-success
+      - ledger
+      - reconciliation
+    # Downstream = provider bill confirmation step (NOT wallet credit).
+    diagnosis:
+      downstream_pending_keys:
+        bill_status:
+          - not_confirmed
+          - pending
+          - unpaid
+        provider_status:
+          - not_confirmed
+          - pending
+      downstream_complete_keys:
+        bill_status:
+          - confirmed
+          - paid
+        provider_status:
+          - confirmed
+      situations:
+        payment_pending:
+          issue_location: bước xử lý thanh toán hóa đơn
+          cause: >-
+            Khoản thanh toán hóa đơn của bạn đang được xử lý.
+            Hệ thống đang xác nhận trạng thái với nhà cung cấp dịch vụ.
+          facts:
+            - thanh toán hóa đơn đang được xử lý
+        payment_ok_delivery_pending:
+          issue_location: bước xác nhận hóa đơn từ nhà cung cấp sau khi thanh toán được ghi nhận
+          cause: >-
+            Thanh toán của bạn đã được ghi nhận nhưng nhà cung cấp chưa xác nhận
+            hóa đơn. Bộ phận phụ trách đang phối hợp với nhà cung cấp để đối soát.
+          facts:
+            - thanh toán đã được ghi nhận
+            - nhà cung cấp chưa xác nhận hóa đơn
+        payment_failed:
+          issue_location: lỗi phát sinh trong quá trình thanh toán hóa đơn
+          cause: >-
+            Thanh toán hóa đơn gặp lỗi trong quá trình xử lý.
+            Nếu đã bị trừ tiền, khoản tiền sẽ được hoàn theo quy trình.
+          facts:
+            - thanh toán hóa đơn gặp lỗi
+        completed:
+          issue_location: ""
+          cause: >-
+            Hóa đơn của bạn đã được nhà cung cấp xác nhận thanh toán.
+          facts:
+            - hóa đơn đã được xác nhận
+        checking:
+          issue_location: bước kiểm tra trạng thái hóa đơn với nhà cung cấp
+          cause: ""
+          facts: []
+    guidance_template: >-
+      Để kiểm tra, bạn có thể cung cấp:
+      mã hóa đơn hoặc mã khách hàng,
+      nhà cung cấp dịch vụ,
+      thời gian thanh toán gần đúng, số tiền.
+    status_template: >-
+      Chúng tôi đang kiểm tra giao dịch thanh toán hóa đơn của bạn.
+    safety_reminder: >-
+      Vui lòng không gửi mã PIN, OTP hoặc mật khẩu.
+
+  merchant_settlement_delay:
+    safe_explanation_scope:
+      - settlement_schedule
+      - payout_status_public
+      - bank_transfer_status
+    allowed_public_topics:
+      - settlement_ledger_status
+      - payout_status
+      - bank_account_configuration
+    evidence_focus:
+      - settlement_status
+      - payout_status
+      - bank_account_configuration
+    safe_missing_info:
+      - merchant_id
+      - tax_code
+      - payout_id
+      - batch_id
+      - settlement_date
+      - bank_account_last4
+    forbidden_terms:
+      - settlement_batch_internal
+      - merchant_payout_internal
+      - force-success
+      - ledger
+      - reconciliation
+      - wallet balance
+      - số dư ví
+    # Downstream = payout/settlement step. NEVER promise manual payout directly.
+    diagnosis:
+      # What the merchant settlement pipeline checks (shown when no per-key
+      # evidence label is available). Public-safe — no raw field names.
+      default_what_was_checked:
+        - chu kỳ settlement
+        - trạng thái giải ngân (payout)
+        - trạng thái tài khoản ngân hàng nhận tiền
+      downstream_pending_keys:
+        payout_status:
+          - not_paid
+          - pending
+          - failed
+        settlement_status:
+          - pending
+          - delayed
+      downstream_complete_keys:
+        payout_status:
+          - paid
+        settlement_status:
+          - completed
+      # The settlement RULE ENGINE result drives the diagnosis (deterministic,
+      # public-safe). Maps the internal action → a public-safe situation.
+      # The internal action name itself is NEVER surfaced to the customer.
+      rule_action_situations:
+        create_manual_payout_draft: payout_incomplete
+        request_bank_account_correction: bank_account_verify
+        manual_settlement_review: settlement_review
+        request_identity_correction: settlement_review
+        draft_customer_response: settlement_in_progress
+        send_unc_email_draft: completed
+        create_merchant_email_draft: settlement_in_progress
+        manual_review: settlement_review
+        wait_sla: settlement_in_progress
+      situations:
+        payment_pending:
+          issue_location: bước xử lý đối soát khoản thanh toán
+          cause: >-
+            Khoản thanh toán của bạn đang được bộ phận đối soát kiểm tra.
+          facts:
+            - khoản thanh toán đang được đối soát
+        payment_ok_delivery_pending:
+          issue_location: bước chuyển khoản giải ngân sau khi đối soát hoàn tất
+          cause: >-
+            Khoản thanh toán đã được ghi nhận trong hệ thống nhưng lệnh giải ngân
+            đang chờ xử lý. Bộ phận Settlement/Ops đang kiểm tra và xử lý theo quy trình.
+          facts:
+            - khoản thanh toán đã được ghi nhận
+            - lệnh giải ngân đang chờ xử lý
+        payment_failed:
+          issue_location: lệnh giải ngân cần được kiểm tra lại
+          cause: >-
+            Lệnh giải ngân gặp trục trặc và cần được kiểm tra lại.
+            Bộ phận Settlement/Ops đang xử lý theo quy trình.
+          facts:
+            - lệnh giải ngân cần được kiểm tra lại
+        # Rule-driven situations
+        payout_incomplete:
+          issue_location: lệnh giải ngân chưa hoàn tất
+          cause: >-
+            Khoản giải ngân của bạn chưa hoàn tất. Bộ phận Settlement/Ops sẽ
+            kiểm tra và xử lý khoản giải ngân theo quy trình.
+          facts:
+            - lệnh giải ngân chưa hoàn tất
+        bank_account_verify:
+          issue_location: thông tin tài khoản ngân hàng nhận tiền cần được xác minh
+          cause: >-
+            Hệ thống cần xác minh lại thông tin tài khoản ngân hàng nhận tiền
+            trước khi giải ngân. Bộ phận phụ trách đang kiểm tra cấu hình tài khoản.
+          facts:
+            - cần xác minh thông tin tài khoản ngân hàng nhận tiền
+          customer_action: >-
+            Vui lòng xác minh lại thông tin tài khoản ngân hàng nhận tiền qua
+            kênh chính thức. Tuyệt đối không cung cấp mật khẩu, OTP hoặc mã PIN.
+        settlement_review:
+          issue_location: lệnh giải ngân cần được kiểm tra lại
+          cause: >-
+            Khoản giải ngân của bạn cần được bộ phận Settlement/Ops kiểm tra lại
+            và xử lý theo quy trình.
+          facts:
+            - khoản giải ngân đang được kiểm tra lại
+        not_due:
+          issue_location: khoản giải ngân chưa đến hạn xử lý
+          cause: >-
+            Khoản giải ngân của bạn chưa đến hạn xử lý theo lịch settlement.
+          facts:
+            - khoản giải ngân chưa đến hạn xử lý
+        settlement_in_progress:
+          issue_location: lệnh giải ngân đang được xử lý
+          cause: >-
+            Khoản giải ngân của bạn đang được xử lý theo lịch settlement.
+            Bộ phận phụ trách sẽ cập nhật khi hoàn tất.
+          facts:
+            - lệnh giải ngân đang được xử lý
+        completed:
+          issue_location: ""
+          cause: >-
+            Khoản giải ngân của bạn đã được xử lý theo lịch settlement.
+          facts:
+            - khoản giải ngân đã được xử lý
+        checking:
+          issue_location: chưa đủ dữ liệu để xác định nguyên nhân
+          cause: >-
+            Bộ phận Settlement/Ops đang kiểm tra chu kỳ settlement, trạng thái
+            giải ngân và tài khoản ngân hàng nhận tiền của bạn.
+          facts: []
+    guidance_template: >-
+      Để kiểm tra khoản thanh toán, bạn có thể cung cấp:
+      mã merchant/đối tác hoặc mã số thuế,
+      ngày settlement/thanh toán,
+      mã payout hoặc mã lô thanh toán,
+      4 số cuối tài khoản ngân hàng nhận tiền.
+    status_template: >-
+      Bộ phận đối soát đang kiểm tra khoản thanh toán của bạn.
+      Kết quả sẽ được cập nhật sớm nhất.
+    safety_reminder: >-
+      Vui lòng không gửi mã PIN, OTP hoặc mật khẩu.

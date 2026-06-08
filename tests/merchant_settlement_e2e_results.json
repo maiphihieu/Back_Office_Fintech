@@ -1,0 +1,328 @@
+{
+  "merchant_tests": [
+    {
+      "test_id": "T001",
+      "merchant_id": "MRC_001_BATCH_FAIL",
+      "route_result": "merchant_settlement_delay",
+      "problem_location": "batch_failed_create_manual_payout",
+      "recommended_action": "create_manual_payout_draft",
+      "approval_required": true,
+      "safety_result": "PASS",
+      "passed": true,
+      "failure_reasons": [],
+      "diagnosis": "batch_failed_create_manual_payout",
+      "diagnosis_message": "Batch settlement failed/không tạo được payout tự động. Merchant có net_settlement_amount > 0, bank account verified. Tạo draft manual payout. Tiền đang ở: trước giai đoạn payout. Cần phê duyệt trước khi thực hiện chuyển khoản.",
+      "evidence_keys": [
+        "merchant_profile",
+        "merchant_bank_account",
+        "merchant_settlement_ledger",
+        "merchant_payout"
+      ]
+    },
+    {
+      "test_id": "T002",
+      "merchant_id": "MRC_002_BATCH_NOT_GENERATED",
+      "route_result": "merchant_settlement_delay",
+      "problem_location": "batch_failed_create_manual_payout",
+      "recommended_action": "create_manual_payout_draft",
+      "approval_required": true,
+      "safety_result": "PASS",
+      "passed": true,
+      "failure_reasons": [],
+      "diagnosis": "batch_failed_create_manual_payout",
+      "diagnosis_message": "Batch settlement failed/không tạo được payout tự động. Merchant có net_settlement_amount > 0, bank account verified. Tạo draft manual payout. Tiền đang ở: trước giai đoạn payout. Cần phê duyệt trước khi thực hiện chuyển khoản.",
+      "evidence_keys": [
+        "merchant_profile",
+        "merchant_bank_account",
+        "merchant_settlement_ledger",
+        "merchant_payout"
+      ]
+    },
+    {
+      "test_id": "T003",
+      "merchant_id": "MRC_003_INVALID_BANK",
+      "route_result": "merchant_settlement_delay",
+      "problem_location": "bank_account_failure_invalid_bank_account",
+      "recommended_action": "request_bank_account_correction",
+      "approval_required": false,
+      "safety_result": "PASS",
+      "passed": true,
+      "failure_reasons": [],
+      "diagnosis": "bank_account_failure_invalid_bank_account",
+      "diagnosis_message": "[merchant_settlement] bank_account_failure_invalid_bank_account",
+      "evidence_keys": [
+        "merchant_profile",
+        "merchant_bank_account",
+        "merchant_settlement_ledger",
+        "settlement_batch",
+        "merchant_payout",
+        "bank_transfer_receipt"
+      ]
+    },
+    {
+      "test_id": "T004",
+      "merchant_id": "MRC_004_NAME_MISMATCH",
+      "route_result": "merchant_settlement_delay",
+      "problem_location": "bank_account_failure_beneficiary_name_mismatch",
+      "recommended_action": "request_bank_account_correction",
+      "approval_required": false,
+      "safety_result": "PASS",
+      "passed": true,
+      "failure_reasons": [],
+      "diagnosis": "bank_account_failure_beneficiary_name_mismatch",
+      "diagnosis_message": "[merchant_settlement] bank_account_failure_beneficiary_name_mismatch",
+      "evidence_keys": [
+        "merchant_profile",
+        "merchant_bank_account",
+        "merchant_settlement_ledger",
+        "settlement_batch",
+        "merchant_payout",
+        "bank_transfer_receipt"
+      ]
+    },
+    {
+      "test_id": "T005",
+      "merchant_id": "MRC_005_BANK_PENDING",
+      "route_result": "merchant_settlement_delay",
+      "problem_location": "payout_in_progress_monitor",
+      "recommended_action": "draft_customer_response",
+      "approval_required": false,
+      "safety_result": "PASS",
+      "passed": true,
+      "failure_reasons": [],
+      "diagnosis": "payout_in_progress_monitor",
+      "diagnosis_message": "Payout đã được tạo và đang xử lý tại ngân hàng. KHÔNG tạo payout mới — rủi ro trùng payout cao. Tiền đang ở: đang trên đường chuyển đến bank merchant.",
+      "evidence_keys": [
+        "merchant_profile",
+        "merchant_bank_account",
+        "merchant_settlement_ledger",
+        "settlement_batch",
+        "merchant_payout",
+        "bank_transfer_receipt"
+      ]
+    },
+    {
+      "test_id": "T006",
+      "merchant_id": "MRC_006_SUCCESS_UNC_SENT",
+      "route_result": "merchant_settlement_delay",
+      "problem_location": "payout_success_unc_already_sent",
+      "recommended_action": "draft_customer_response",
+      "approval_required": false,
+      "safety_result": "PASS",
+      "passed": true,
+      "failure_reasons": [],
+      "diagnosis": "payout_success_unc_already_sent",
+      "diagnosis_message": "Payout đã thành công và UNC đã gửi cho merchant. KHÔNG tạo payout mới. Gửi lại reference UNC. Tiền đã ở: bank account merchant.",
+      "evidence_keys": [
+        "merchant_profile",
+        "merchant_bank_account",
+        "merchant_settlement_ledger",
+        "settlement_batch",
+        "merchant_payout",
+        "bank_transfer_receipt"
+      ]
+    },
+    {
+      "test_id": "T007",
+      "merchant_id": "MRC_007_SUCCESS_UNC_NOT_SENT",
+      "route_result": "merchant_settlement_delay",
+      "problem_location": "payout_success_unc_not_sent",
+      "recommended_action": "send_unc_email_draft",
+      "approval_required": true,
+      "safety_result": "PASS",
+      "passed": true,
+      "failure_reasons": [],
+      "diagnosis": "payout_success_unc_not_sent",
+      "diagnosis_message": "Payout đã thành công nhưng UNC/biên lai chưa gửi cho merchant. Tạo draft email gửi UNC. Tiền đã ở: bank account merchant. Không tạo payout mới.",
+      "evidence_keys": [
+        "merchant_profile",
+        "merchant_bank_account",
+        "merchant_settlement_ledger",
+        "settlement_batch",
+        "merchant_payout",
+        "bank_transfer_receipt"
+      ]
+    },
+    {
+      "test_id": "T008",
+      "merchant_id": "MRC_008_ZERO_NET",
+      "route_result": "merchant_settlement_delay",
+      "problem_location": "net_settlement_zero_or_negative",
+      "recommended_action": "draft_customer_response",
+      "approval_required": false,
+      "safety_result": "PASS",
+      "passed": true,
+      "failure_reasons": [],
+      "diagnosis": "net_settlement_zero_or_negative",
+      "diagnosis_message": "Net settlement amount = 0 hoặc âm do phí/hoàn tiền/chargeback đã offset hết gross amount. Gửi sao kê settlement cho merchant. Tiền đang ở: không có khoản giải ngân.",
+      "evidence_keys": [
+        "merchant_profile",
+        "merchant_bank_account",
+        "merchant_settlement_ledger",
+        "settlement_batch",
+        "merchant_payout"
+      ]
+    },
+    {
+      "test_id": "T009",
+      "merchant_id": "MRC_009_BANK_TIMEOUT",
+      "route_result": "merchant_settlement_delay",
+      "problem_location": "payout_failed_retriable_retry_payout",
+      "recommended_action": "create_manual_payout_draft",
+      "approval_required": true,
+      "safety_result": "PASS",
+      "passed": true,
+      "failure_reasons": [],
+      "diagnosis": "payout_failed_retriable_retry_payout",
+      "diagnosis_message": "Payout đã được tạo nhưng chuyển khoản thất bại do lỗi tạm thời (bank_timeout / system_error). Tạo draft retry payout. Tiền đang ở: settlement pool, chưa đến bank merchant. Cần phê duyệt trước khi retry.",
+      "evidence_keys": [
+        "merchant_profile",
+        "merchant_bank_account",
+        "merchant_settlement_ledger",
+        "settlement_batch",
+        "merchant_payout",
+        "bank_transfer_receipt"
+      ]
+    },
+    {
+      "test_id": "T010",
+      "merchant_id": "MRC_010_BANK_PENDING_VERIFY",
+      "route_result": "merchant_settlement_delay",
+      "problem_location": "bank_account_failure_bank_account_not_verified",
+      "recommended_action": "request_bank_account_correction",
+      "approval_required": false,
+      "safety_result": "PASS",
+      "passed": true,
+      "failure_reasons": [],
+      "diagnosis": "bank_account_failure_bank_account_not_verified",
+      "diagnosis_message": "[merchant_settlement] bank_account_failure_bank_account_not_verified",
+      "evidence_keys": [
+        "merchant_profile",
+        "merchant_bank_account",
+        "merchant_settlement_ledger",
+        "settlement_batch",
+        "merchant_payout"
+      ]
+    },
+    {
+      "test_id": "T011",
+      "merchant_id": "MRC_011_NO_LEDGER",
+      "route_result": "merchant_settlement_delay",
+      "problem_location": "settlement_ledger_not_found",
+      "recommended_action": "manual_settlement_review",
+      "approval_required": true,
+      "safety_result": "PASS",
+      "passed": true,
+      "failure_reasons": [],
+      "diagnosis": "settlement_ledger_not_found",
+      "diagnosis_message": "Không tìm thấy settlement ledger cho merchant. Không có dữ liệu thanh toán để xử lý. Cần kiểm tra thủ công.",
+      "evidence_keys": [
+        "merchant_profile",
+        "merchant_bank_account"
+      ]
+    },
+    {
+      "test_id": "T012",
+      "merchant_id": "MRC_012_NOT_DUE_YET",
+      "route_result": "merchant_settlement_delay",
+      "problem_location": "settlement_not_due_yet",
+      "recommended_action": "draft_customer_response",
+      "approval_required": false,
+      "safety_result": "PASS",
+      "passed": true,
+      "failure_reasons": [],
+      "diagnosis": "settlement_not_due_yet",
+      "diagnosis_message": "Settlement chưa đến hạn thanh toán (due_date chưa tới). Thông báo cho merchant thời điểm dự kiến giải ngân.",
+      "evidence_keys": [
+        "merchant_profile",
+        "merchant_bank_account",
+        "merchant_settlement_ledger",
+        "settlement_batch",
+        "merchant_payout"
+      ]
+    },
+    {
+      "test_id": "T013",
+      "merchant_id": "MRC_013_AMOUNT_MISMATCH",
+      "route_result": "merchant_settlement_delay",
+      "problem_location": "payout_amount_less_than_ledger_difference_payout",
+      "recommended_action": "manual_settlement_review",
+      "approval_required": true,
+      "safety_result": "PASS",
+      "passed": true,
+      "failure_reasons": [],
+      "diagnosis": "payout_amount_less_than_ledger_difference_payout",
+      "diagnosis_message": "Payout đã thành công nhưng số tiền payout < ledger net amount. Có chênh lệch cần bù payout bổ sung hoặc review. Tiền đang ở: một phần ở bank merchant, phần chênh lệch ở settlement pool.",
+      "evidence_keys": [
+        "merchant_profile",
+        "merchant_bank_account",
+        "merchant_settlement_ledger",
+        "settlement_batch",
+        "merchant_payout",
+        "bank_transfer_receipt"
+      ]
+    },
+    {
+      "test_id": "T014",
+      "merchant_id": "MRC_014_MERCHANT_ON_HOLD",
+      "route_result": "merchant_settlement_delay",
+      "problem_location": "merchant_on_hold_escalate_ops",
+      "recommended_action": "manual_settlement_review",
+      "approval_required": true,
+      "safety_result": "PASS",
+      "passed": true,
+      "failure_reasons": [],
+      "diagnosis": "merchant_on_hold_escalate_ops",
+      "diagnosis_message": "Merchant đang ở trạng thái on_hold. Không giải ngân. Escalate Ops/Risk để kiểm tra. Tiền đang ở: settlement pool, giữ lại do on_hold.",
+      "evidence_keys": [
+        "merchant_profile",
+        "merchant_bank_account",
+        "merchant_settlement_ledger",
+        "settlement_batch",
+        "merchant_payout"
+      ]
+    },
+    {
+      "test_id": "T015",
+      "merchant_id": "MRC_015_BANK_INACTIVE",
+      "route_result": "merchant_settlement_delay",
+      "problem_location": "bank_account_inactive",
+      "recommended_action": "request_bank_account_correction",
+      "approval_required": false,
+      "safety_result": "PASS",
+      "passed": true,
+      "failure_reasons": [],
+      "diagnosis": "bank_account_inactive",
+      "diagnosis_message": "Tài khoản ngân hàng của merchant đã bị vô hiệu hóa. Yêu cầu merchant cung cấp tài khoản ngân hàng mới.",
+      "evidence_keys": [
+        "merchant_profile",
+        "merchant_bank_account",
+        "merchant_settlement_ledger",
+        "settlement_batch",
+        "merchant_payout"
+      ]
+    }
+  ],
+  "regression": [
+    {
+      "name": "wallet_topup",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "name": "fraud_account_lock",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "name": "train_ticket",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "name": "utility_bill",
+      "passed": true,
+      "reason": ""
+    }
+  ]
+}

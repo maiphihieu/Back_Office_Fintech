@@ -79,6 +79,10 @@ class GeneratedResponse(BaseModel):
         default_factory=list,
         description="Các lưu ý an toàn, đặc biệt nếu action chỉ là draft hoặc cần phê duyệt",
     )
+    missing_data: list[str] = Field(
+        default_factory=list,
+        description="Dữ liệu còn thiếu để kết luận chính xác hơn",
+    )
     debug: ResponseDebug = Field(
         default_factory=ResponseDebug,
         description="Debug/observability info — generation_mode, errors, model used",

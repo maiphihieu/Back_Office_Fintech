@@ -124,8 +124,33 @@ def get_fraud_repo(settings: Settings | None = None):
     return SupabaseFraudRepository(_get_sb_client(s))
 
 
+def get_merchant_settlement_repo(settings: Settings | None = None):
+    """Get MerchantSettlementRepository (Supabase only — no JSON fallback).
+
+    Use case 3: Merchant settlement delay.
+    """
+    s = settings or get_settings()
+    from fintech_agent.repositories.supabase.supabase_merchant_settlement_repo import (
+        SupabaseMerchantSettlementRepository,
+    )
+    return SupabaseMerchantSettlementRepository(_get_sb_client(s))
+
+
+def get_mock_session_repo(settings: Settings | None = None):
+    """Get MockSessionRepository (Supabase only — no JSON fallback).
+
+    Mock customer sessions for demo login.
+    """
+    s = settings or get_settings()
+    from fintech_agent.repositories.supabase.supabase_mock_session_repo import (
+        SupabaseMockSessionRepository,
+    )
+    return SupabaseMockSessionRepository(_get_sb_client(s))
+
+
 def reset_factory() -> None:
     """Reset cached client (for testing)."""
     global _supabase_client
     _supabase_client = None
+
 

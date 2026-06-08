@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     # --- LLM ---
     openai_api_key: str = ""
-    openai_model: str = "gpt-4.1-mini"
+    openai_model: str = "gpt-4o-mini"
     mock_llm: bool = True
     llm_timeout: int = 30
 

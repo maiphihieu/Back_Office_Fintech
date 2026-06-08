@@ -25,6 +25,7 @@ import logging
 import os
 from typing import Any
 
+from fintech_agent.llm.diagnostic_engine import DiagnosticResult, diagnose
 from fintech_agent.schemas.response_generation import GeneratedResponse, ResponseDebug
 
 logger = logging.getLogger(__name__)
@@ -323,6 +324,165 @@ def build_response_context(state: dict[str, Any]) -> dict[str, Any]:
     return context
 
 
+# ─── Diagnostic Helper ──────────────────────────────────────────
+
+
+def _run_diagnostic(state: dict[str, Any]) -> DiagnosticResult:
+    """Run DiagnosticEngine on state and return structured result."""
+    workflow = state.get("selected_workflow") or "unknown"
+    diagnosis = ""
+
+    # Extract diagnosis from recommended_action or top-level state
+    action = state.get("recommended_action")
+    if action is not None:
+        if hasattr(action, "diagnosis"):
+            diagnosis = action.diagnosis or ""
+        elif isinstance(action, dict):
+            diagnosis = action.get("diagnosis", "")
+        elif isinstance(action, str):
+            diagnosis = action
+    if not diagnosis:
+        diagnosis = state.get("diagnosis", "")
+
+    # Evidence bundle
+    eb = state.get("evidence_bundle") or state.get("evidence")
+
+    # Extracted info
+    ei = state.get("extracted_info")
+    ei_dict = None
+    if ei is not None:
+        if hasattr(ei, "model_dump"):
+            ei_dict = ei.model_dump(mode="json", exclude_none=True)
+        elif isinstance(ei, dict):
+            ei_dict = ei
+
+    return diagnose(workflow, diagnosis, eb, ei_dict)
+
+
+def _diagnostic_to_response(
+    diagnostic: DiagnosticResult,
+    state: dict[str, Any],
+    reason: str = "LLM không khả dụng",
+    llm_error: str | None = None,
+) -> GeneratedResponse:
+    """Convert DiagnosticResult to GeneratedResponse.
+
+    Builds a structured, data-driven response from the diagnostic engine
+    instead of vague generic text.
+    """
+    workflow = state.get("selected_workflow") or "unknown"
+    bn = diagnostic.bottleneck
+    res = diagnostic.resolution
+
+    # Build case summary from diagnostic + extracted info
+    ei = state.get("extracted_info")
+    ei_phone = None
+    if ei is not None:
+        if hasattr(ei, "phone"):
+            ei_phone = ei.phone
+        elif isinstance(ei, dict):
+            ei_phone = ei.get("phone")
+
+    if workflow == "fraud_account_lock":
+        case_summary = (
+            "Khách hàng khiếu nại tài khoản bị khóa và không thể rút tiền."
+            + (f" Số điện thoại: {ei_phone}." if ei_phone else "")
+        )
+    elif workflow == "wallet_topup":
+        case_summary = (
+            "Khách hàng khiếu nại nạp tiền vào ví nhưng số dư chưa được cập nhật."
+        )
+    elif workflow == "merchant_settlement_delay":
+        case_summary = (
+            "Đối tác/merchant khiếu nại chưa nhận được tiền giải ngân "
+            "theo chu kỳ thanh toán."
+        )
+    else:
+        case_summary = (
+            "Hệ thống đã ghi nhận khiếu nại và thu thập evidence."
+        )
+
+    # Next step from diagnostic resolution
+    next_step_parts = res.next_steps_for_staff
+    recommended_next_step = " → ".join(next_step_parts) if next_step_parts else (
+        "Nhân viên xem lại evidence, action đề xuất và trạng thái phê duyệt."
+    )
+
+    # Customer reply
+    if bn.location == "identity_lookup":
+        customer_reply = (
+            "Dạ em đã ghi nhận trường hợp của anh/chị. "
+            "Tuy nhiên em cần xác nhận lại thông tin tài khoản. "
+            "Anh/chị vui lòng kiểm tra lại số điện thoại đã đăng ký ví, "
+            "email hoặc cung cấp mã giao dịch gần nhất để em tra cứu giúp ạ."
+        )
+    elif workflow == "fraud_account_lock":
+        customer_reply = (
+            "Dạ em đã ghi nhận trường hợp tài khoản của anh/chị bị khóa "
+            "và không thể rút tiền. Bộ phận phụ trách sẽ kiểm tra "
+            "thông tin bảo mật và cập nhật kết quả sau khi hoàn tất xác minh."
+        )
+    elif workflow == "wallet_topup":
+        customer_reply = (
+            "Dạ em đã ghi nhận trường hợp nạp tiền của anh/chị. "
+            "Bộ phận kỹ thuật đang kiểm tra và sẽ cập nhật kết quả sớm nhất."
+        )
+    elif workflow == "merchant_settlement_delay":
+        customer_reply = (
+            "Chúng tôi đã ghi nhận yêu cầu về khoản thanh toán settlement. "
+            "Đội ngũ Settlement đang kiểm tra và sẽ cập nhật kết quả "
+            "sau khi hoàn tất xác minh nội bộ."
+        )
+    else:
+        customer_reply = (
+            "Dạ em đã ghi nhận khiếu nại của anh/chị. Bộ phận phụ trách sẽ kiểm tra "
+            "thông tin và cập nhật kết quả sau khi hoàn tất xác minh nội bộ."
+        )
+
+    # Safety notes
+    safety_notes = [
+        "Không tự động thực hiện action ảnh hưởng tiền hoặc tài khoản.",
+        "Nếu action cần phê duyệt, phải chờ nhân viên phê duyệt trước khi xử lý tiếp.",
+    ]
+    if workflow == "fraud_account_lock":
+        safety_notes.extend([
+            "Không tự động unlock account.",
+            "Không tiết lộ risk_score, fraud threshold hoặc rule nội bộ cho khách.",
+        ])
+    elif workflow == "merchant_settlement_delay":
+        safety_notes.extend([
+            "Không tự động thực hiện payout.",
+            "Số tiền payout lấy từ settlement_ledger, không từ merchant claim.",
+            "Không tạo payout nếu bank account chưa verified.",
+            "Không tạo payout trùng nếu payout đang processing/success.",
+            "Manual payout cần phê duyệt.",
+        ])
+
+    return GeneratedResponse(
+        case_summary=case_summary,
+        problem_location=bn.location,
+        problem_explanation=bn.explanation,
+        evidence_checked=[],  # Will be enriched by ticket_builder
+        evidence_supporting_problem_location=bn.evidence,
+        problem_location_confidence=bn.confidence,
+        internal_summary=(
+            f"DiagnosticEngine fallback. Workflow={workflow}, "
+            f"Bottleneck={bn.location}, Confidence={bn.confidence}, "
+            f"Action={res.recommended_action}. Reason: {reason}"
+        ),
+        recommended_next_step=recommended_next_step,
+        customer_reply_draft=customer_reply,
+        safety_notes=safety_notes,
+        missing_data=diagnostic.missing_data,
+        debug=ResponseDebug(
+            generation_mode="fallback",
+            fallback_reason=reason,
+            llm_error=llm_error,
+            model_used=None,
+        ),
+    )
+
+
 # ─── Safe Fallback ──────────────────────────────────────────────
 
 
@@ -331,266 +491,13 @@ def generate_safe_fallback_response(
     reason: str = "LLM không khả dụng",
     llm_error: str | None = None,
 ) -> GeneratedResponse:
-    """Generate a generic safe response when LLM is unavailable or fails.
+    """Generate a diagnostic-driven safe response when LLM is unavailable.
 
-    Workflow-aware: produces richer explanations for fraud_account_lock
-    when evidence is available.
+    Uses the DiagnosticEngine to produce structured, data-driven explanations
+    instead of vague generic text. All workflows are supported.
     """
-    selected_workflow = state.get("selected_workflow")
-
-    # ── Fraud-specific fallback ──
-    if selected_workflow == "fraud_account_lock":
-        return _generate_fraud_fallback(state, reason, llm_error)
-
-    # ── Generic fallback ──
-    return GeneratedResponse(
-        case_summary=(
-            "Hệ thống đã ghi nhận khiếu nại và trích xuất thông tin liên quan từ case."
-        ),
-        problem_location="unknown",
-        problem_explanation=(
-            "Không đủ thông tin từ structured evidence để xác định nguyên nhân gốc. "
-            "Nhân viên cần kiểm tra lại evidence trước khi kết luận."
-        ),
-        evidence_checked=[],
-        evidence_supporting_problem_location=[],
-        problem_location_confidence="unknown",
-        internal_summary=(
-            f"LLM response generation fallback. Lý do: {reason}"
-        ),
-        recommended_next_step=(
-            "Nhân viên xem lại evidence, action đề xuất và trạng thái phê duyệt "
-            "trước khi xử lý."
-        ),
-        customer_reply_draft=(
-            "Dạ em đã ghi nhận khiếu nại của anh/chị. Bộ phận phụ trách sẽ kiểm tra "
-            "thông tin và cập nhật kết quả sau khi hoàn tất xác minh nội bộ."
-        ),
-        safety_notes=[
-            "Không tự động thực hiện action ảnh hưởng tiền hoặc tài khoản.",
-            "Nếu action cần phê duyệt, phải chờ nhân viên phê duyệt trước khi xử lý tiếp.",
-        ],
-        debug=ResponseDebug(
-            generation_mode="fallback",
-            fallback_reason=reason,
-            llm_error=llm_error,
-            model_used=None,
-        ),
-    )
-
-
-def _generate_fraud_fallback(
-    state: dict[str, Any],
-    reason: str,
-    llm_error: str | None,
-) -> GeneratedResponse:
-    """Fraud-specific fallback response with rich evidence-based explanation."""
-    eb = state.get("evidence_bundle") or state.get("evidence")
-    evidence_checked: list[str] = []
-    supporting: list[str] = []
-
-    # Extract fraud evidence details
-    account_status_val = None
-    withdrawal_val = None
-    lock_reason_val = None
-    risk_score = None
-    risk_level = None
-    fraud_status = None
-    recommended_decision = None
-
-    if eb is not None:
-        if hasattr(eb, "account_status") and eb.account_status:
-            acct = eb.account_status
-            account_status_val = acct.account_status
-            withdrawal_val = acct.withdrawal_enabled
-            lock_reason_val = acct.lock_reason
-            evidence_checked.extend([
-                "Trạng thái tài khoản",
-                "Trạng thái rút tiền",
-            ])
-            supporting.append(f"account_status={account_status_val}")
-            supporting.append(f"withdrawal_enabled={withdrawal_val}")
-            if lock_reason_val:
-                supporting.append(f"lock_reason={lock_reason_val}")
-
-        if hasattr(eb, "fraud_case") and eb.fraud_case:
-            fc = eb.fraud_case
-            risk_score = fc.risk_score
-            risk_level = fc.risk_level
-            fraud_status = fc.fraud_status
-            recommended_decision = fc.recommended_decision
-            evidence_checked.extend([
-                "Mức rủi ro / Điểm rủi ro",
-                "Trạng thái fraud",
-                "Kết quả rà soát fraud",
-            ])
-            if risk_score is not None:
-                supporting.append(f"risk_score={risk_score}")
-            if risk_level:
-                supporting.append(f"risk_level={risk_level}")
-            if fraud_status:
-                supporting.append(f"fraud_status={fraud_status}")
-            if recommended_decision:
-                supporting.append(f"recommended_decision={recommended_decision}")
-
-            # Device/login signals
-            if fc.device_events:
-                evidence_checked.append("Tín hiệu thiết bị/đăng nhập")
-            if fc.recent_transactions:
-                evidence_checked.append("Giao dịch đáng ngờ gần đây")
-
-    # ── Detect identity lookup failure ──
-    # If neither account_status nor fraud_case exist, identity was not resolved
-    identity_not_found = (account_status_val is None and fraud_status is None)
-
-    # Extract phone from extracted_info for the explanation
-    ei = state.get("extracted_info")
-    ei_phone = None
-    if ei is not None:
-        if hasattr(ei, "model_dump"):
-            ei_phone = getattr(ei, "phone", None)
-        elif isinstance(ei, dict):
-            ei_phone = ei.get("phone")
-
-    # Build problem explanation based on evidence
-    if identity_not_found and ei_phone:
-        problem_explanation = (
-            f"Không tìm thấy tài khoản khớp với số điện thoại "
-            f"{ei_phone} trong hệ thống. "
-            "Vì chưa định danh được tài khoản, agent chưa thể "
-            "xác minh trạng thái khóa, trạng thái rút tiền "
-            "hoặc dữ liệu Risk/Fraud. "
-            "Cần yêu cầu khách kiểm tra lại số điện thoại/email/"
-            "wallet_id hoặc cung cấp mã giao dịch gần nhất."
-        )
-        confidence = "low"
-    elif identity_not_found:
-        problem_explanation = (
-            "Chưa định danh được tài khoản khách hàng. "
-            "Agent chưa thể xác minh trạng thái khóa, "
-            "trạng thái rút tiền hoặc dữ liệu Risk/Fraud. "
-            "Cần yêu cầu khách cung cấp số điện thoại/email/"
-            "wallet_id hoặc mã giao dịch gần nhất."
-        )
-        confidence = "low"
-    else:
-        is_false_positive = (
-            risk_level in ("low", "medium")
-            or recommended_decision in ("unlock", "false_positive_candidate", "review_needed")
-        )
-
-        if is_false_positive:
-            problem_explanation = (
-                "Hệ thống Fraud Detection đã khóa tài khoản, khiến khách không thể rút tiền. "
-                "Tuy nhiên dữ liệu rủi ro hiện ở mức thấp"
-                + (f" (risk_score={risk_score})" if risk_score is not None else "")
-                + ", KYC hợp lệ và không có tín hiệu giao dịch bất thường nghiêm trọng. "
-                "Vì vậy case này có khả năng là false positive. "
-                "Agent đề xuất tạo bản nháp mở khóa tài khoản, "
-                "cần Risk/Ops phê duyệt trước khi thực hiện."
-            )
-            confidence = "high"
-        elif risk_level == "high":
-            problem_explanation = (
-                "Hệ thống ghi nhận nhiều tín hiệu rủi ro ở mức cao. "
-                "Không đề xuất mở khóa tài khoản. Nhân viên cần giữ trạng thái khóa, "
-                "yêu cầu khách bổ sung chứng từ xác minh "
-                "và chuyển Risk/Fraud review."
-            )
-            confidence = "high"
-        else:
-            # Missing evidence or ambiguous risk
-            problem_explanation = (
-                "Hệ thống Fraud Detection đã khóa tài khoản. "
-                "Tuy nhiên dữ liệu fraud evidence chưa đầy đủ để kết luận"
-                + (f" (risk_level={risk_level})" if risk_level else "")
-                + ". Cần kiểm tra thêm fraud case, risk signals, "
-                "lịch sử giao dịch, thiết bị đăng nhập và KYC trước khi quyết định."
-            )
-            confidence = "medium"
-
-    case_summary = (
-        "Khách hàng khiếu nại tài khoản bị khóa và không thể rút tiền. "
-        + (f"Số điện thoại: {ei_phone}. " if ei_phone else "")
-        + f"Trạng thái tài khoản: {account_status_val or 'chưa xác định'}. "
-        + f"Mức rủi ro: {risk_level or 'chưa xác định'}."
-    )
-
-    # Action-specific next step
-    action = state.get("recommended_action")
-    action_type = None
-    if action is not None:
-        if hasattr(action, "action_type"):
-            action_type = action.action_type.value if hasattr(action.action_type, "value") else str(action.action_type)
-        elif isinstance(action, str):
-            action_type = action
-
-    if identity_not_found:
-        next_step = (
-            "Yêu cầu khách xác nhận lại số điện thoại đăng ký ví, "
-            "email, wallet_id hoặc cung cấp mã giao dịch gần nhất. "
-            "Sau khi định danh được tài khoản, nhân viên mới kiểm tra "
-            "account_status, withdrawal_status, fraud_case, risk signals và KYC."
-        )
-    elif action_type == "create_unlock_account_draft":
-        next_step = (
-            "Kiểm tra fraud evidence và risk signals. "
-            "Nếu xác nhận false positive, phê duyệt draft mở khóa tài khoản."
-        )
-    elif action_type == "create_request_documents_response_draft":
-        next_step = (
-            "Yêu cầu khách bổ sung giấy tờ xác minh. "
-            "Tài khoản vẫn bị khóa trong thời gian xác minh."
-        )
-    else:
-        next_step = (
-            "Nhân viên kiểm tra toàn bộ fraud evidence, risk signals "
-            "và lịch sử giao dịch trước khi quyết định."
-        )
-
-    # Customer reply — identity-not-found needs different wording
-    if identity_not_found:
-        customer_reply = (
-            "Dạ em đã ghi nhận trường hợp của anh/chị. "
-            "Tuy nhiên em cần xác nhận lại thông tin tài khoản. "
-            "Anh/chị vui lòng kiểm tra lại số điện thoại đã đăng ký ví, "
-            "email hoặc cung cấp mã giao dịch gần nhất để em tra cứu giúp ạ."
-        )
-    else:
-        customer_reply = (
-            "Dạ em đã ghi nhận trường hợp tài khoản của anh/chị bị khóa "
-            "và không thể rút tiền. Bộ phận phụ trách sẽ kiểm tra "
-            "thông tin bảo mật và cập nhật kết quả sau khi hoàn tất xác minh."
-        )
-
-    return GeneratedResponse(
-        case_summary=case_summary,
-        problem_location="fraud_system" if not identity_not_found else "identity_lookup",
-        problem_explanation=problem_explanation,
-        evidence_checked=evidence_checked,
-        evidence_supporting_problem_location=supporting,
-        problem_location_confidence=confidence,
-        internal_summary=(
-            f"Fraud account lock case. "
-            f"Identity resolved: {not identity_not_found}. "
-            f"Risk: {risk_level}, Score: {risk_score}, "
-            f"Decision: {recommended_decision}. "
-            f"Fallback: {reason}"
-        ),
-        recommended_next_step=next_step,
-        customer_reply_draft=customer_reply,
-        safety_notes=[
-            "Không tự động unlock account.",
-            "Không bỏ qua phê duyệt Risk/Ops.",
-            "Không tiết lộ risk_score, fraud threshold hoặc rule nội bộ cho khách.",
-        ],
-        debug=ResponseDebug(
-            generation_mode="fallback",
-            fallback_reason=reason,
-            llm_error=llm_error,
-            model_used=None,
-        ),
-    )
+    diagnostic = _run_diagnostic(state)
+    return _diagnostic_to_response(diagnostic, state, reason, llm_error)
 
 
 # ─── LLM Call ───────────────────────────────────────────────────
@@ -671,6 +578,8 @@ def generate_response_with_llm(state: dict[str, Any]) -> GeneratedResponse:
             parsed["safety_notes"] = []
         if "evidence_supporting_problem_location" not in parsed:
             parsed["evidence_supporting_problem_location"] = []
+        if "missing_data" not in parsed:
+            parsed["missing_data"] = []
         if "problem_location_confidence" not in parsed:
             parsed["problem_location_confidence"] = "unknown"
 

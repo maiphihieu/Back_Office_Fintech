@@ -45,6 +45,12 @@ def apply_rules(state: AgentState, audit: AuditLogger | None = None) -> AgentSta
             fraud_case=evidence.fraud_case,
             evidence=evidence,
         )
+    elif workflow == "merchant_settlement_delay":
+        from fintech_agent.rules.merchant_settlement_rules import decide_merchant_settlement
+        decision = decide_merchant_settlement(
+            evidence=evidence,
+            extracted_info=state.get("extracted_info"),
+        )
     else:
         return {
             "status": CaseStatus.MANUAL_REVIEW,

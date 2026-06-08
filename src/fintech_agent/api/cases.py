@@ -120,6 +120,13 @@ def _state_to_response(state: AgentState) -> CaseResponse:
             reconciliation_status=_serialize_model(
                 getattr(eb, "reconciliation_status", None)
             ),
+            # Merchant settlement evidence
+            merchant_profile=_serialize_model(getattr(eb, "merchant_profile", None)),
+            merchant_bank_account=_serialize_model(getattr(eb, "merchant_bank_account", None)),
+            merchant_settlement_ledger=_serialize_model(getattr(eb, "merchant_settlement_ledger", None)),
+            settlement_batch=_serialize_model(getattr(eb, "settlement_batch", None)),
+            merchant_payout=_serialize_model(getattr(eb, "merchant_payout", None)),
+            bank_transfer_receipt=_serialize_model(getattr(eb, "bank_transfer_receipt", None)),
         )
 
     # Conflicts
@@ -150,6 +157,15 @@ def _state_to_response(state: AgentState) -> CaseResponse:
     if state.get("selected_workflow") == "wallet_topup" and diagnosis_raw and recommended_action:
         try:
             diagnosis_message = get_cs_message(ActionType(recommended_action), diagnosis_raw)
+        except (ValueError, KeyError):
+            pass
+    # Diagnosis message for merchant_settlement_delay
+    elif state.get("selected_workflow") == "merchant_settlement_delay" and diagnosis_raw and recommended_action:
+        try:
+            from fintech_agent.messages.merchant_settlement_messages import (
+                get_cs_message as get_ms_cs_message,
+            )
+            diagnosis_message = get_ms_cs_message(ActionType(recommended_action), diagnosis_raw)
         except (ValueError, KeyError):
             pass
 

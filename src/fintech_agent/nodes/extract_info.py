@@ -62,16 +62,30 @@ def extract_info(
             selected_workflow = "wallet_topup"
         elif st == "account_security":
             selected_workflow = "fraud_account_lock"
+        elif st == "merchant_settlement":
+            selected_workflow = "merchant_settlement_delay"
 
     # ── Missing fields (use extractor's or compute) ───────────
     # Workflow-aware: fraud_account_lock does NOT need transaction_id.
     # It needs identity (user_id, phone, email, or wallet_id) instead.
+    # merchant_settlement_delay needs merchant identity, not transaction_id.
     missing = list(extracted.missing_fields) if extracted.missing_fields else []
     if not missing:
         is_fraud_workflow = selected_workflow == "fraud_account_lock"
-        if not extracted.transaction_id and not is_fraud_workflow:
+        is_merchant_workflow = selected_workflow == "merchant_settlement_delay"
+        if not extracted.transaction_id and not is_fraud_workflow and not is_merchant_workflow:
             missing.append("transaction_id")
-        if not extracted.user_id:
+        if is_merchant_workflow:
+            # Merchant workflow: check for merchant identity
+            has_merchant_identity = (
+                getattr(extracted, "merchant_id", None)
+                or getattr(extracted, "phone", None)
+                or getattr(extracted, "email", None)
+                or getattr(extracted, "tax_code", None)
+            )
+            if not has_merchant_identity:
+                missing.append("merchant_id")
+        elif not extracted.user_id:
             # For fraud, phone/email/wallet_id can resolve user_id later
             has_identity_hint = (
                 getattr(extracted, "phone", None)

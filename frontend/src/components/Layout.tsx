@@ -1,13 +1,16 @@
 /* ─── Layout with sidebar navigation + language toggle ─── */
 
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useI18n } from '../lib/i18n';
 
 export default function Layout() {
   const { t, toggleLang } = useI18n();
+  const location = useLocation();
+  const isDashboard = location.pathname === '/create';
 
   const NAV_ITEMS = [
     { to: '/', icon: '📋', label: t('nav.cases') },
+    { to: '/chat-tickets', icon: '💬', label: t('nav.chat_tickets') },
     { to: '/create', icon: '➕', label: t('nav.create') },
     { to: '/safety', icon: '🛡️', label: t('nav.safety') },
   ];
@@ -44,7 +47,7 @@ export default function Layout() {
           </button>
         </div>
       </aside>
-      <main className="main-content">
+      <main className={`main-content${isDashboard ? ' main-content--dashboard' : ''}`}>
         <Outlet />
       </main>
     </div>

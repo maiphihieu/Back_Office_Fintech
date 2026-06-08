@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from fintech_agent.database.repository_factory import get_reconciliation_repo
+
+if TYPE_CHECKING:
+    from fintech_agent.repositories.reconciliation_repository import ReconciliationRepository
 from fintech_agent.schemas.evidence import ReconciliationStatus
 
 TOOL_NAME = "get_reconciliation_status"

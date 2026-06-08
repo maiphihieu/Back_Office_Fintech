@@ -468,3 +468,117 @@ async def handle_get_user_by_wallet_id(wallet_id: str) -> dict:
         return {"error": str(e)}
 
 
+# ═══════════════════════════════════════════════════════════════
+#  Merchant settlement read-only handlers (Case 3)
+# ═══════════════════════════════════════════════════════════════
+
+
+async def handle_get_merchant_profile(
+    merchant_id: str | None = None,
+    phone: str | None = None,
+    email: str | None = None,
+    tax_code: str | None = None,
+) -> dict:
+    """Fetch merchant profile by identity. Read-only."""
+    try:
+        from fintech_agent.database.repository_factory import get_merchant_settlement_repo
+        repo = get_merchant_settlement_repo()
+        result = repo.get_merchant_profile(
+            merchant_id=merchant_id, phone=phone, email=email, tax_code=tax_code,
+        )
+        if result is None:
+            return {"error": "Merchant not found"}
+        return result.model_dump(mode="json")
+    except Exception as e:
+        _logger.exception("handle_get_merchant_profile failed")
+        return {"error": str(e)}
+
+
+async def handle_get_merchant_bank_account(merchant_id: str) -> dict:
+    """Fetch merchant bank account by merchant_id. Read-only."""
+    try:
+        from fintech_agent.database.repository_factory import get_merchant_settlement_repo
+        repo = get_merchant_settlement_repo()
+        result = repo.get_merchant_bank_account(merchant_id)
+        if result is None:
+            return {"error": f"Bank account not found for merchant: {merchant_id}"}
+        return result.model_dump(mode="json")
+    except Exception as e:
+        _logger.exception("handle_get_merchant_bank_account failed for %s", merchant_id)
+        return {"error": str(e)}
+
+
+async def handle_get_settlement_batch(
+    settlement_date: str | None = None,
+    cycle: str = "D+1",
+    batch_id: str | None = None,
+) -> dict:
+    """Fetch settlement batch. Read-only."""
+    try:
+        from fintech_agent.database.repository_factory import get_merchant_settlement_repo
+        repo = get_merchant_settlement_repo()
+        result = repo.get_settlement_batch(
+            batch_id=batch_id, settlement_date=settlement_date, cycle=cycle,
+        )
+        if result is None:
+            return {"error": "Settlement batch not found"}
+        return result.model_dump(mode="json")
+    except Exception as e:
+        _logger.exception("handle_get_settlement_batch failed")
+        return {"error": str(e)}
+
+
+async def handle_get_merchant_settlement_ledger(
+    merchant_id: str,
+    settlement_date: str | None = None,
+) -> dict:
+    """Fetch merchant settlement ledger. Read-only."""
+    try:
+        from fintech_agent.database.repository_factory import get_merchant_settlement_repo
+        repo = get_merchant_settlement_repo()
+        result = repo.get_merchant_settlement_ledger(merchant_id, settlement_date)
+        if result is None:
+            return {"error": f"Settlement ledger not found for merchant: {merchant_id}"}
+        return result.model_dump(mode="json")
+    except Exception as e:
+        _logger.exception("handle_get_merchant_settlement_ledger failed for %s", merchant_id)
+        return {"error": str(e)}
+
+
+async def handle_get_merchant_payout(
+    merchant_id: str,
+    settlement_date: str | None = None,
+    payout_id: str | None = None,
+) -> dict:
+    """Fetch merchant payout. Read-only."""
+    try:
+        from fintech_agent.database.repository_factory import get_merchant_settlement_repo
+        repo = get_merchant_settlement_repo()
+        result = repo.get_merchant_payout(
+            merchant_id, settlement_date=settlement_date, payout_id=payout_id,
+        )
+        if result is None:
+            return {"error": f"Payout not found for merchant: {merchant_id}"}
+        return result.model_dump(mode="json")
+    except Exception as e:
+        _logger.exception("handle_get_merchant_payout failed for %s", merchant_id)
+        return {"error": str(e)}
+
+
+async def handle_get_bank_transfer_receipt(
+    bank_transfer_ref: str | None = None,
+    payout_id: str | None = None,
+) -> dict:
+    """Fetch bank transfer receipt. Read-only."""
+    try:
+        from fintech_agent.database.repository_factory import get_merchant_settlement_repo
+        repo = get_merchant_settlement_repo()
+        result = repo.get_bank_transfer_receipt(
+            bank_transfer_ref=bank_transfer_ref, payout_id=payout_id,
+        )
+        if result is None:
+            return {"error": "Bank transfer receipt not found"}
+        return result.model_dump(mode="json")
+    except Exception as e:
+        _logger.exception("handle_get_bank_transfer_receipt failed")
+        return {"error": str(e)}

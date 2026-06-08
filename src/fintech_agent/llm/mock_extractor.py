@@ -292,7 +292,17 @@ def mock_extract(complaint: str, user_id: str | None = None) -> ExtractedInfo:
 
     if not service_type:
         lower = complaint.lower()
-        if any(kw in lower for kw in ("vé tàu", "train", "ticket")):
+        # Merchant settlement MUST come before wallet_topup because
+        # both may mention "ngân hàng" / "bank" — merchant keywords are more specific.
+        if any(kw in lower for kw in (
+            "merchant", "cửa hàng", "giải ngân", "quyết toán",
+            "thanh toán d+1", "thanh toán d+2", "chu kỳ d+1", "chu kỳ d+2",
+            "quá chu kỳ", "payout", "settlement",
+            "tiền giải ngân", "settlement delayed",
+            "payout not received", "merchant settlement",
+        )):
+            service_type = "merchant_settlement"
+        elif any(kw in lower for kw in ("vé tàu", "train", "ticket")):
             service_type = "train_ticket"
         # account_security MUST come before electric_bill because
         # "điện thoại" (phone) contains "điện" (electricity).
@@ -323,12 +333,55 @@ def mock_extract(complaint: str, user_id: str | None = None) -> ExtractedInfo:
         # NOTE: Do NOT default to U_FRAUD_001. If user_id is missing,
         # identity will be resolved from phone/email/wallet_id in fetch_evidence.
         # Defaulting to a hardcoded user_id could fetch the WRONG user's data.
+    elif service_type == "merchant_settlement":
+        # Classify settlement issue subtype
+        if any(kw in lower for kw in ("payout failed", "giải ngân thất bại", "lỗi giải ngân")):
+            issue_type = "payout_failed"
+        elif any(kw in lower for kw in ("bank account invalid", "tài khoản ngân hàng.*sai", "sai tài khoản")):
+            issue_type = "bank_account_invalid"
+        elif any(kw in lower for kw in ("unc", "biên lai", "chứng từ")):
+            issue_type = "unc_not_received"
+        elif any(kw in lower for kw in ("chưa nhận được tiền", "payout not received", "chưa nhận tiền")):
+            issue_type = "payout_not_received"
+        else:
+            issue_type = "settlement_delayed"
     elif any(kw in lower for kw in ("chưa nhận", "không nhận", "no ticket")):
         issue_type = "paid_but_no_ticket"
     elif any(kw in lower for kw in ("chưa xác nhận", "not confirmed")):
         issue_type = "paid_but_provider_not_confirmed"
     elif any(kw in lower for kw in ("thất bại", "bị lỗi", "failed")):
         issue_type = "provider_failed"
+
+    # ── Extract merchant-specific fields ───────────────────────
+    extracted_merchant_id: str | None = None
+    m = re.search(r"(MRC_\w+)", complaint)
+    if m:
+        extracted_merchant_id = m.group(1)
+
+    extracted_settlement_cycle: str | None = None
+    m = re.search(r"(D\+\d+)", complaint, re.IGNORECASE)
+    if m:
+        extracted_settlement_cycle = m.group(1).upper()
+
+    extracted_payout_id: str | None = None
+    m = re.search(r"(PAYOUT_\w+)", complaint)
+    if m:
+        extracted_payout_id = m.group(1)
+
+    extracted_batch_id: str | None = None
+    m = re.search(r"(BATCH_\w+)", complaint)
+    if m:
+        extracted_batch_id = m.group(1)
+
+    extracted_tax_code: str | None = None
+    m = re.search(r"(?:MST|mã số thuế|tax.?code)[:\s]*(\d{10,13})", complaint, re.IGNORECASE)
+    if m:
+        extracted_tax_code = m.group(1)
+
+    extracted_bank_account: str | None = None
+    m = re.search(r"(?:STK|số tài khoản|bank.?account|tài khoản)[:\s]*(\d{6,20})", complaint, re.IGNORECASE)
+    if m:
+        extracted_bank_account = m.group(1)
 
     # Extract amount_claimed from text (e.g. "350,000 VND", "450000₫")
     # SAFETY: Skip numbers that are in wallet-balance context (e.g. "ví vẫn 0đ")
@@ -366,11 +419,23 @@ def mock_extract(complaint: str, user_id: str | None = None) -> ExtractedInfo:
                 break
 
     # Compute missing fields
-    # Note: transaction_id is NOT required for account_security workflow
+    # Note: transaction_id is NOT required for account_security or merchant_settlement.
+    # Merchant settlement uses merchant_id as primary identity.
     missing: list[str] = []
-    if not txn_id and service_type != "account_security":
+    is_merchant = service_type == "merchant_settlement"
+    if not txn_id and service_type != "account_security" and not is_merchant:
         missing.append("transaction_id")
-    if not extracted_user_id:
+    if is_merchant:
+        # Merchant workflow: need merchant identity, not user_id/transaction_id
+        has_merchant_identity = (
+            extracted_merchant_id
+            or extracted_phone
+            or extracted_email
+            or extracted_tax_code
+        )
+        if not has_merchant_identity:
+            missing.append("merchant_id")
+    elif not extracted_user_id:
         # For fraud, phone/email/wallet_id can resolve user_id later
         has_identity_hint = (
             extracted_phone or extracted_email or extracted_wallet_id
@@ -394,6 +459,13 @@ def mock_extract(complaint: str, user_id: str | None = None) -> ExtractedInfo:
         phone=extracted_phone,
         email=extracted_email,
         wallet_id=extracted_wallet_id,
+        # Merchant settlement fields
+        merchant_id=extracted_merchant_id,
+        settlement_cycle=extracted_settlement_cycle,
+        payout_id=extracted_payout_id,
+        batch_id=extracted_batch_id,
+        tax_code=extracted_tax_code,
+        bank_account_number=extracted_bank_account,
         amount_claimed=amount_claimed,
         language="vi",
         confidence=1.0 if not missing else 0.5,
