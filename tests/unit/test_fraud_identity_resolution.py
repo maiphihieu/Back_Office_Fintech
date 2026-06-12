@@ -334,21 +334,19 @@ class TestMCPClientIdentityTools:
     """Verify MCP client handler map includes identity resolution tools."""
 
     def test_handler_map_has_identity_tools(self):
-        from fintech_agent.mcp_client.client import get_mcp_client
-        mcp = get_mcp_client()
-        handler_map = mcp._get_handler_map()
-        assert "get_user_by_phone" in handler_map
-        assert "get_user_by_email" in handler_map
-        assert "get_user_by_wallet_id" in handler_map
+        from fintech_agent.mcp_server.server import mcp
+        tool_names = mcp._tool_manager._tools.keys()
+        assert "get_user_by_phone" in tool_names
+        assert "get_user_by_email" in tool_names
+        assert "get_user_by_wallet_id" in tool_names
 
     def test_existing_fraud_tools_still_present(self):
-        from fintech_agent.mcp_client.client import get_mcp_client
-        mcp = get_mcp_client()
-        handler_map = mcp._get_handler_map()
-        assert "get_account_status" in handler_map
-        assert "get_fraud_case" in handler_map
-        assert "create_unlock_account_draft" in handler_map
-        assert "create_request_documents_response_draft" in handler_map
+        from fintech_agent.mcp_server.server import mcp
+        tool_names = mcp._tool_manager._tools.keys()
+        assert "get_account_status" in tool_names
+        assert "get_fraud_case" in tool_names
+        assert "create_unlock_account_draft" in tool_names
+        assert "create_request_documents_response_draft" in tool_names
 
 
 # ═══════════════════════════════════════════════════════════════

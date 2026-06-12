@@ -1,6 +1,6 @@
 """Unit tests for MCP server tools — verifies tools work through the MCP client.
 
-Tests use the in-process MCP client which calls MCP handlers directly.
+Tests drive the MCP client over its stdio transport (the real MCP protocol).
 All data comes from Supabase (SUPABASE_ENABLED=true).
 """
 
@@ -11,8 +11,10 @@ from fintech_agent.mcp_client.client import FintechMCPClient
 
 @pytest.fixture
 def mcp() -> FintechMCPClient:
-    """Create a fresh in-process MCP client for each test."""
-    return FintechMCPClient(mode="in_process")
+    """Create a fresh MCP client for each test, tearing it down afterward."""
+    client = FintechMCPClient()
+    yield client
+    client.close()
 
 
 class TestReadOnlyTools:

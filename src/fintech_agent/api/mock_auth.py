@@ -20,6 +20,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from fintech_agent.api.server_runtime import SERVER_INSTANCE_ID
 from fintech_agent.database.repository_factory import get_mock_session_repo
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,8 @@ class MeResponse(BaseModel):
     display_name: str = ""
     role: str = ""
     is_authenticated: bool = False
+    # Changes on every backend restart → lets the client reset a stale chat.
+    server_instance_id: str = ""
 
 
 # ─── Safe field extraction ──────────────────────────────────────
@@ -147,17 +150,17 @@ async def get_me(
 ) -> MeResponse:
     """Check if a session_id is still valid."""
     if not session_id:
-        return MeResponse(is_authenticated=False)
+        return MeResponse(is_authenticated=False, server_instance_id=SERVER_INSTANCE_ID)
 
     try:
         repo = get_mock_session_repo()
         session = repo.get_session(session_id)
     except Exception as exc:
         logger.error("[MockAuth] Failed to check session: %s", exc)
-        return MeResponse(is_authenticated=False)
+        return MeResponse(is_authenticated=False, server_instance_id=SERVER_INSTANCE_ID)
 
     if session is None:
-        return MeResponse(is_authenticated=False)
+        return MeResponse(is_authenticated=False, server_instance_id=SERVER_INSTANCE_ID)
 
     return MeResponse(
         session_id=session["session_id"],
@@ -165,6 +168,7 @@ async def get_me(
         display_name=session["display_name"],
         role=session.get("role", "customer"),
         is_authenticated=True,
+        server_instance_id=SERVER_INSTANCE_ID,
     )
 
 

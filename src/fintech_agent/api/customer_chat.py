@@ -40,6 +40,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -93,30 +94,9 @@ class CustomerChatResponse(BaseModel):
     )
 
 
-# ─── Safe Missing-Info Question Mapping ─────────────────────────
-
-_SAFE_QUESTION_MAP: dict[str, str] = {
-    "transaction_id": (
-        "Bạn có thể gửi mã giao dịch, hoặc thời gian giao dịch gần đúng, "
-        "số tiền và ngân hàng đã trừ tiền."
-    ),
-    "user_id": "Vui lòng cung cấp tên tài khoản hoặc số điện thoại đã đăng ký ví.",
-    "phone": "Vui lòng cung cấp số điện thoại đã đăng ký ví.",
-    "email": "Vui lòng cung cấp email đã đăng ký ví.",
-    "merchant_id": "Vui lòng cung cấp mã đối tác (Merchant ID).",
-    "merchant_name": "Vui lòng cung cấp tên đối tác/merchant.",
-    "tax_code": "Vui lòng cung cấp mã số thuế.",
-    "payout_id": "Vui lòng cung cấp mã thanh toán (Payout ID).",
-    "batch_id": "Vui lòng cung cấp mã lô thanh toán (Batch ID).",
-    "order_id": "Vui lòng cung cấp mã đơn hàng.",
-    "bill_code": "Vui lòng cung cấp mã hóa đơn.",
-    "customer_code": "Vui lòng cung cấp mã khách hàng.",
-    "service_type": "Vui lòng cho biết loại dịch vụ bạn đang sử dụng.",
-    "transaction_time": "Vui lòng cho biết thời gian giao dịch gần đúng.",
-    "amount": "Vui lòng cho biết số tiền giao dịch.",
-    "bank_name": "Vui lòng cho biết ngân hàng bạn đã dùng.",
-    "bank_reference": "Vui lòng cung cấp mã tham chiếu ngân hàng.",
-}
+# ─── Security Constants (kept for backward compat) ──────────────
+# Question generation now uses compose_contextual_questions() from
+# response_composer.py — context-aware, LLM-first with safe fallback.
 
 # Fields we NEVER ask the customer about
 _BLOCKED_QUESTION_FIELDS = frozenset({
@@ -139,6 +119,7 @@ _MERCHANT_KNOWN_FIELDS = frozenset({
 # ─── Imports from new pipeline modules ──────────────────────────
 
 from fintech_agent.llm.message_analyzer import (
+    NON_CASE_MESSAGE_TYPES,
     ActiveCaseContext,
     ExtractedFields,
     MessageAnalysis,
@@ -146,12 +127,30 @@ from fintech_agent.llm.message_analyzer import (
     load_response_policy,
 )
 from fintech_agent.api.generic_resolver import (
+    NO_MATCH_INSIST_RESPONSE,
     ResolutionResult,
+    amount_mismatch_message,
+    no_lock_evidence_message,
+    no_match_message,
     resolve_case_evidence,
 )
+from fintech_agent.api.customer_claims import (
+    CustomerClaims,
+    VerifiedEvidence,
+    Contradiction,
+    detect_contradictions,
+    get_unverified_claims,
+)
 from fintech_agent.safety.evidence_mapper import to_public_safe_evidence
-from fintech_agent.llm.response_composer import compose_customer_response
-from fintech_agent.safety.output_guardrail import check_response_safety
+from fintech_agent.llm.response_composer import (
+    compose_customer_response,
+    compose_contextual_questions,
+)
+from fintech_agent.safety.output_guardrail import (
+    check_evidence_grounding,
+    check_response_safety,
+    sanitize_customer_text,
+)
 from fintech_agent.safety.redaction import redact_sensitive
 from fintech_agent.api.chat_handoff import finalize_customer_chat_and_handoff, get_ticket_store
 from datetime import datetime, timezone
@@ -183,34 +182,207 @@ def _record_turn(ctx, role: str, text: str) -> None:
 # ─── Active Case Context (per session) ──────────────────────────
 
 _session_context: dict[str, ActiveCaseContext] = {}
+# Wall-clock time of each session's last message, for the idle TTL below.
+_session_last_active: dict[str, float] = {}
+
+# Reset a chat after this many seconds of inactivity (matches the frontend's
+# 3-minute localStorage TTL so both sides forget a stale conversation together).
+SESSION_IDLE_TTL_SECONDS = 3 * 60
+
+
+def _get_active_context(session_id: str | None) -> ActiveCaseContext:
+    """Load a session's active context, expiring it after the idle TTL.
+
+    If the customer has been silent longer than SESSION_IDLE_TTL_SECONDS, the
+    old context is dropped and a fresh one is returned — so they get a clean
+    chat, not a stale case/diagnosis from minutes ago.
+    """
+    if not session_id:
+        return ActiveCaseContext()
+    last = _session_last_active.get(session_id)
+    if last is not None and (time.time() - last) > SESSION_IDLE_TTL_SECONDS:
+        _session_context.pop(session_id, None)
+        _session_last_active.pop(session_id, None)
+        logger.info(
+            "[CustomerChat] Session %s idle > %ds — context expired, fresh chat",
+            session_id, SESSION_IDLE_TTL_SECONDS,
+        )
+    return _session_context.get(session_id, ActiveCaseContext())
+
+
+def reset_session_contexts() -> None:
+    """Clear all in-memory chat contexts (for tests)."""
+    _session_context.clear()
+    _session_last_active.clear()
+
+
+# Workflows the resolver/rule-engine can actually diagnose.
+# Now read from the workflow registry — no more hardcoded frozenset.
+def _known_workflows() -> frozenset[str]:
+    """Get all known workflow IDs from the registry.
+
+    Drop-in replacement for the old ``_KNOWN_WORKFLOWS`` frozenset.
+    Falls back to a static set if registry import fails.
+    """
+    try:
+        from fintech_agent.workflows.workflow_registry import get_registry
+        return get_registry().known_workflow_ids()
+    except Exception:
+        return frozenset({
+            "wallet_topup", "fraud_account_lock", "train_ticket",
+            "utility_bill", "merchant_settlement_delay",
+        })
+
+
+# Legacy alias for any code that still references _KNOWN_WORKFLOWS
+_KNOWN_WORKFLOWS = _known_workflows()
+
+
+def _is_workflow_switch(ctx: ActiveCaseContext, analysis: MessageAnalysis) -> bool:
+    """True when the customer raises a different known workflow than the active case.
+
+    Data-driven from the LLM's workflow_hint + message_type — never from phrase
+    matching. A pure follow-up/info/status message about the SAME service is not
+    a switch even if the hint momentarily differs.
+    """
+    known = _known_workflows()
+    return (
+        bool(ctx.selected_workflow)
+        and analysis.workflow_hint in known
+        and analysis.workflow_hint != ctx.selected_workflow
+        and analysis.message_type in ("workflow_switch", "new_complaint")
+    )
+
+
+def _start_fresh_case_for_switch(
+    old_ctx: ActiveCaseContext,
+    message: str,
+) -> ActiveCaseContext:
+    """Start a fresh logical case on a workflow switch.
+
+    Keeps the conversation (transcript) and identity, but drops ALL case-specific
+    state (workflow, diagnosis, evidence, claims, contradictions, extracted info)
+    so the new workflow is answered only from its own data.
+    """
+    fresh = ActiveCaseContext(
+        subject_type=old_ctx.subject_type,
+        transcript=list(old_ctx.transcript),       # same chat, continued
+        customer_problem=redact_sensitive(message),  # the new problem
+        customer_emotion=old_ctx.customer_emotion,
+    )
+    # Fresh claim/evidence trackers — never reuse the old workflow's facts.
+    fresh._customer_claims = CustomerClaims()
+    fresh._verified_evidence = VerifiedEvidence()
+    fresh._contradictions = []
+    return fresh
+
+
+def _apply_evidence_grounding(
+    text: str,
+    resolution: ResolutionResult,
+    ctx: ActiveCaseContext,
+    workflow: str,
+) -> str:
+    """Enforce the fact-source rule on a final customer reply.
+
+    Confirmed-status wording must be backed by a verified entity on the
+    logged-in account (this turn's resolver result, or the case's bound
+    evidence from an earlier verified turn), and any amount stated alongside
+    it must equal the VERIFIED amount — never the customer's claim. If the
+    check fails, the reply is replaced with an honest not-found fallback.
+    """
+    bound = getattr(ctx, "_verified_evidence", None)
+    entity = resolution.resolved_entity_id or (
+        getattr(bound, "resolved_entity_id", "") or None
+    )
+    amount = (
+        resolution.verified_amount
+        if resolution.verified_amount is not None
+        else getattr(bound, "verified_amount", None)
+    )
+    status = resolution.resolution_status
+    if status not in ("resolved", "amount_mismatch") and entity:
+        # Bound evidence from an earlier verified turn still backs the case.
+        status = "resolved"
+
+    # Account-lock claims are only allowed when the account record itself
+    # shows lock evidence — the customer's claim never counts.
+    lock_evidence: bool | None = None
+    is_account_flow = (
+        (workflow or "") == "fraud_account_lock"
+        or resolution.resolved_entity_type == "account"
+    )
+    if is_account_flow:
+        ev = resolution.public_safe_evidence or {}
+        bound_status = str(getattr(bound, "verified_status", "") or "")
+        lock_evidence = bool(
+            ev.get("lock_evidence_found")
+            or resolution.verified_status in ("locked", "restricted", "under_review")
+            or bound_status in ("locked", "restricted", "under_review")
+        )
+
+    fallback = (
+        no_lock_evidence_message() if is_account_flow and not lock_evidence
+        else no_match_message(workflow or "")
+    )
+    result = check_evidence_grounding(
+        text,
+        resolver_status=status,
+        verified_entity_id=entity,
+        verified_amount=amount,
+        fallback_text=fallback,
+        lock_evidence=lock_evidence,
+    )
+    if result.is_safe:
+        return text
+    logger.warning(
+        "[CustomerChat] Evidence grounding replaced reply (status=%s, entity=%s)",
+        resolution.resolution_status, entity,
+    )
+    return result.sanitized_text or no_match_message(workflow or "")
 
 
 # ─── Helper Functions ───────────────────────────────────────────
 
-def _build_safe_questions(
-    missing_fields: list[str],
-    session: dict | None = None,
-) -> list[str]:
-    """Convert internal missing field names to safe customer questions."""
-    known_fields: frozenset[str] = frozenset()
-    if session is not None:
-        subject_type = session.get("subject_type", "")
-        if subject_type == "wallet_user":
-            known_fields = _WALLET_USER_KNOWN_FIELDS
-        elif subject_type == "merchant":
-            known_fields = _MERCHANT_KNOWN_FIELDS
 
-    questions: list[str] = []
-    for field_name in missing_fields:
-        lower = field_name.lower()
-        if any(blocked in lower for blocked in _BLOCKED_QUESTION_FIELDS):
-            continue
-        if field_name in known_fields:
-            continue
-        question = _SAFE_QUESTION_MAP.get(field_name)
-        if question:
-            questions.append(question)
-    return questions
+def _build_off_topic_reply(
+    message_type: str,
+    session: dict | None,
+    policy: dict,
+) -> str:
+    """Build a safe reply for off-topic / greeting messages.
+
+    Does NOT create a case or ask for transaction info.
+    Just redirects the customer back to the supported scope.
+    """
+    # Check policy for custom templates first
+    greeting_reply = policy.get("greeting_reply", "")
+    out_of_scope_reply = policy.get("out_of_scope_reply", "")
+
+    if message_type == "greeting" and greeting_reply:
+        return greeting_reply
+    if message_type == "out_of_scope" and out_of_scope_reply:
+        return out_of_scope_reply
+
+    # Determine display name from session for personalization
+    name = ""
+    if session:
+        name = session.get("display_name", "") or ""
+
+    if message_type == "greeting":
+        hello = f"Xin chào{' ' + name if name else ''}!"
+        return (
+            f"{hello} Tôi là trợ lý hỗ trợ khiếu nại. "
+            "Bạn có thể mô tả vấn đề bạn đang gặp — ví dụ: "
+            "nạp tiền không vào ví, chưa nhận vé tàu, hoặc hóa đơn chưa được ghi nhận."
+        )
+
+    # out_of_scope
+    return (
+        "Tôi là trợ lý hỗ trợ khiếu nại giao dịch. "
+        "Nếu bạn đang gặp vấn đề về nạp tiền, mua vé, thanh toán hóa đơn "
+        "hoặc giải ngân merchant, hãy mô tả chi tiết để tôi hỗ trợ nhé."
+    )
 
 
 def _map_to_customer_status(internal_status: CaseStatus | str) -> str:
@@ -268,7 +440,7 @@ def _build_complaint_with_identity(
     if subject_type == "wallet_user":
         for key, label in [
             ("user_id", "User ID"), ("wallet_id", "Wallet ID"),
-            ("phone", "SĐT"), ("email", "Email"), ("display_name", "Tên"),
+            ("phone", "SĐT"), ("email", "Email"),
         ]:
             val = session.get(key)
             if val:
@@ -277,7 +449,7 @@ def _build_complaint_with_identity(
     elif subject_type == "merchant":
         for key, label in [
             ("merchant_id", "Merchant ID"), ("tax_code", "MST"),
-            ("phone", "SĐT"), ("email", "Email"), ("display_name", "Tên"),
+            ("phone", "SĐT"), ("email", "Email"),
         ]:
             val = session.get(key)
             if val:
@@ -509,6 +681,60 @@ def _subtract_provided_fields(
     return [f for f in missing_info if f not in satisfied]
 
 
+# ─── Ticket Decision Logic ─────────────────────────────────────
+
+def _should_create_ticket(
+    analysis: MessageAnalysis,
+    resolution: ResolutionResult,
+    state: dict | None,
+    ctx: ActiveCaseContext,
+) -> bool:
+    """Decide if a back-office ticket is needed.
+
+    Returns False for interactions that don't warrant staff attention:
+    - Off-topic / greeting messages
+    - FAQ questions answered fully in-chat
+    - Cases fully resolved without needing staff action
+
+    Returns True when staff attention is warranted:
+    - Rule engine produced a decision requiring review
+    - Approval is required
+    - Unresolved financial issue with active case
+    - Contradictions detected between claims and evidence
+    """
+    # NO ticket for off-topic, greeting, or acknowledgements
+    if analysis.message_type in NON_CASE_MESSAGE_TYPES or analysis.message_type == "thank_you":
+        return False
+
+    # NO ticket when the system could not find ANY matching data for the
+    # logged-in account (no verified evidence). staff_handling_required is
+    # false by default here — the customer must supply stronger evidence, ask
+    # for staff explicitly, or a rule must require review first.
+    if resolution.resolution_status == "no_match":
+        return False
+
+    # YES ticket if workflow state has rule decisions or approval needed
+    if state and isinstance(state, dict):
+        if state.get("rule_decision"):
+            return True
+        if state.get("approval_required"):
+            return True
+
+    # YES ticket if contradictions detected (staff needs to review)
+    if hasattr(ctx, '_contradictions') and ctx._contradictions:
+        return True
+
+    # YES ticket if unresolved financial issue with active case (but only when
+    # there IS verified evidence to work with — no_match is excluded above).
+    if ctx.case_id and resolution.resolution_status != "resolved":
+        return True
+
+    # Otherwise (e.g. resolved in chat, FAQ answered) → no staff handoff needed.
+    # A ticket is still created when the chat actually ends/expires via the
+    # /customer-chat/handoff endpoint if staff handling is required.
+    return False
+
+
 # ─── Endpoint ──────────────────────────────────────────────────
 
 @router.post(
@@ -566,12 +792,11 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
                 missing_info_questions=[],
             )
 
-    # ── Step 2: Load active case context ──
-    ctx = (
-        _session_context.get(req.session_id, ActiveCaseContext())
-        if req.session_id
-        else ActiveCaseContext()
-    )
+    # ── Step 2: Load active case context (expires after idle TTL) ──
+    ctx = _get_active_context(req.session_id)
+    # Mark this request as activity so the idle timer counts from now.
+    if req.session_id:
+        _session_last_active[req.session_id] = time.time()
 
     # Record the customer turn (redacted) + first-problem / identity for handoff
     _record_turn(ctx, "customer", req.message)
@@ -605,9 +830,51 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
 
     analysis = analyze_customer_message(req.message, case_context, session_ctx)
 
+    # Amount claimed in THIS message (before accumulated context is merged back
+    # into the extraction) — used to decide whether the customer is actively
+    # (re)asserting an amount vs. merely following up.
+    _turn_claimed_amount = analysis.extracted.amount
+
+    # ── Step 3a2: Workflow switch — customer raised a DIFFERENT service ──
+    # Start a fresh logical case for the new workflow so no diagnosis, evidence,
+    # claims, or wording from the previous workflow leaks into the new answer.
+    if _is_workflow_switch(ctx, analysis):
+        logger.info(
+            "[CustomerChat] Workflow switch %s → %s — fresh case, no cross-workflow reuse",
+            ctx.selected_workflow, analysis.workflow_hint,
+        )
+        ctx = _start_fresh_case_for_switch(ctx, req.message)
+        case_context = {
+            "selected_workflow": "", "service_type": "",
+            "awaiting_field": "", "has_active_case": False,
+        }
+
     # ── Step 3b: Persist extracted fields into active case context ──
     # Accumulate across messages — don't discard previous extractions.
     _merge_extracted_into_context(ctx, analysis.extracted)
+
+    # ── Step 3b2: Track customer claims (separate from verified evidence) ──
+    if not hasattr(ctx, '_customer_claims'):
+        ctx._customer_claims = CustomerClaims()
+    if not hasattr(ctx, '_verified_evidence'):
+        ctx._verified_evidence = VerifiedEvidence()
+    if not hasattr(ctx, '_contradictions'):
+        ctx._contradictions = []
+
+    # Merge into claim tracker (claims are UNVERIFIED)
+    ctx._customer_claims.merge_extracted_fields(
+        analysis.extracted,
+        is_correction=analysis.is_correction,
+    )
+
+    # On correction: clear stale diagnosis so we re-evaluate
+    if analysis.is_correction and ctx.last_diagnosis:
+        logger.info(
+            "[CustomerChat] Customer corrected previous info — clearing stale diagnosis"
+        )
+        ctx.last_diagnosis = {}
+        ctx._verified_evidence = VerifiedEvidence()
+        ctx._contradictions = []
 
     # ── Step 3c: Merge accumulated context back into analysis.extracted ──
     # So resolver sees ALL info gathered across messages, not just this one.
@@ -618,12 +885,40 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
     _recalculate_missing_fields(ctx)
     missing_after = list(ctx.missing_fields)
 
-    # ── Step 3e: Active case workflow is AUTHORITATIVE ──
-    # For anything that is not a brand-new complaint, the active case's
-    # selected_workflow drives evidence lookup, diagnosis, and guardrail —
-    # NOT the per-message workflow_hint (which the LLM may guess wrong, e.g.
-    # classifying a train_ticket follow-up as wallet_topup).
-    if ctx.selected_workflow and analysis.message_type != "new_complaint":
+    # ── Step 3e: Active case workflow is AUTHORITATIVE — unless a clear
+    #    workflow mismatch is detected ──
+    # For anything that is not a brand-new complaint OR a workflow switch,
+    # the active case's selected_workflow drives evidence lookup, diagnosis,
+    # and guardrail — NOT the per-message workflow_hint (which the LLM may
+    # guess wrong, e.g. classifying a train_ticket follow-up as wallet_topup).
+    #
+    # HOWEVER: if the analyzer detected a STRONG signal for a DIFFERENT
+    # workflow (e.g. "tài khoản bị khóa" while wallet_topup is active)
+    # and set belongs_to_active_case=False + message_type="workflow_switch",
+    # we must NOT override — this IS a genuine workflow switch.
+    is_mismatch_switch = (
+        ctx.selected_workflow
+        and analysis.workflow_hint != ctx.selected_workflow
+        and analysis.workflow_hint != "unknown"
+        and not analysis.belongs_to_active_case
+        and analysis.message_type in ("workflow_switch", "new_complaint")
+    )
+
+    if is_mismatch_switch:
+        # Genuine workflow switch detected — start a fresh case
+        logger.info(
+            "[CustomerChat] Workflow mismatch guardrail: %s → %s "
+            "(msg_type=%s, belongs_to_case=%s) — switching case",
+            ctx.selected_workflow, analysis.workflow_hint,
+            analysis.message_type, analysis.belongs_to_active_case,
+        )
+        ctx = _start_fresh_case_for_switch(ctx, req.message)
+        case_context = {
+            "selected_workflow": "", "service_type": "",
+            "awaiting_field": "", "has_active_case": False,
+        }
+        # Do NOT override workflow_hint — keep the analyzer's detected workflow
+    elif ctx.selected_workflow and analysis.message_type not in ("new_complaint", "workflow_switch"):
         if analysis.workflow_hint != ctx.selected_workflow:
             logger.info(
                 "[CustomerChat] Overriding workflow_hint=%s with active "
@@ -659,6 +954,54 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
     trace.populate_analysis(analysis)
     trace.case_context.missing_fields_after = list(ctx.missing_fields)
     trace.case_context.extracted_info_after = dict(ctx.extracted_info)
+
+    # ── Step 3e1.5: Thank-you / acknowledgement with active case ──
+    # When customer says "được rồi", "ok", "cảm ơn", "tôi hiểu rồi" and
+    # there IS an active case, we must NOT reset, NOT show greeting, NOT
+    # re-run the resolver, and NOT create a new case/ticket.
+    # Just respond with a short case-aware acknowledgement.
+    if analysis.message_type == "thank_you" and ctx.selected_workflow:
+        from fintech_agent.llm.response_composer import compose_acknowledgement_response
+        ack_reply = compose_acknowledgement_response(
+            resolution_status=ctx.extracted_info.get("resolution_status", ""),
+            workflow=ctx.selected_workflow,
+        )
+        _record_turn(ctx, "agent", ack_reply)
+        if req.session_id:
+            _session_context[req.session_id] = ctx
+        logger.info(
+            "[CustomerChat] thank_you with active case '%s' — short ack (no reset, no ticket)",
+            ctx.selected_workflow,
+        )
+        return CustomerChatResponse(
+            public_case_id=ctx.case_id or "pending",
+            status="received",
+            public_response=ack_reply,
+            missing_info_questions=[],
+        )
+
+    # ── Step 3e2: Off-topic / greeting → answer in scope, do NOT force a workflow ──
+    # These are not complaints, so we must not ask for transaction_id, create a
+    # case, or funnel them into the active workflow. Keeps the bot from replying
+    # about "nạp tiền"/"vé" to "1+1?" or "kể chuyện cười".
+    # thank_you WITHOUT an active case also falls here (normal greeting allowed).
+    if analysis.message_type in NON_CASE_MESSAGE_TYPES or (
+        analysis.message_type == "thank_you" and not ctx.selected_workflow
+    ):
+        reply = _build_off_topic_reply(analysis.message_type, session, policy)
+        _record_turn(ctx, "agent", reply)
+        if req.session_id:
+            _session_context[req.session_id] = ctx
+        logger.info(
+            "[CustomerChat] Off-topic message_type=%s — in-scope redirect (no case)",
+            analysis.message_type,
+        )
+        return CustomerChatResponse(
+            public_case_id=ctx.case_id or "pending",
+            status="received",
+            public_response=reply,
+            missing_info_questions=[],
+        )
 
     # ── Step 3f: Explicit staff-support request → back-office handoff ──
     # Customer-initiated handoff. Creates/updates ONE ticket (deduped) and
@@ -746,6 +1089,80 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
         resolution.missing_info, ctx.extracted_info,
     )
 
+    # ── Step 6b: Build verified evidence + detect contradictions ──
+    # Evidence binding: verified facts come ONLY from the resolver's verified_*
+    # fields (DB/tool data for the logged-in account) — never from customer
+    # claims. amount_mismatch also binds evidence (the verified record exists;
+    # the CLAIM doesn't match it).
+    if (
+        resolution.resolution_status in ("resolved", "amount_mismatch")
+        and resolution.resolved_entity_id
+    ):
+        ctx._verified_evidence = VerifiedEvidence(
+            resolved_entity_id=resolution.resolved_entity_id or "",
+            resolved_entity_type=resolution.resolved_entity_type,
+            verified_amount=resolution.verified_amount,
+            verified_status=resolution.verified_status,
+            verified_owner_id=resolution.verified_owner_id,
+            verified_bank_name=resolution.verified_bank_name,
+            verified_bank_status=resolution.verified_bank_status,
+            verified_provider_status=resolution.verified_provider_status,
+            evidence_source="transaction_table",
+        )
+        ctx._contradictions = detect_contradictions(
+            ctx._customer_claims, ctx._verified_evidence,
+        )
+        if ctx._contradictions:
+            logger.info(
+                "[CustomerChat] Detected %d contradiction(s): %s",
+                len(ctx._contradictions),
+                [(c.field, c.customer_claim, c.verified_value) for c in ctx._contradictions],
+            )
+
+    # ── Step 6b2: Amount claim conflicts with verified evidence ──
+    # Two triggers, both data-driven:
+    #   a) resolver fallback returned amount_mismatch (claimed amount matched
+    #      nothing, but a verified problematic record exists on the account);
+    #   b) the resolver verified a record (e.g. by stored id) and THIS turn's
+    #      message claimed a different amount.
+    # Reply deterministically from the dynamic claim/verified values — the old
+    # diagnosis is stale for this claim and must not be reused.
+    _amount_conflict = next(
+        (c for c in (getattr(ctx, "_contradictions", []) or []) if c.field == "amount"),
+        None,
+    )
+    if resolution.resolution_status == "amount_mismatch" or (
+        resolution.resolution_status == "resolved"
+        and _amount_conflict is not None
+        and _turn_claimed_amount  # this turn actually (re)claimed an amount
+    ):
+        claimed_val = resolution.claimed_amount
+        if claimed_val is None and _amount_conflict is not None:
+            claimed_val = _amount_conflict.customer_claim
+        verified_val = resolution.verified_amount
+
+        # The previous diagnosis was built for a different claim context.
+        ctx.last_diagnosis = {}
+
+        wf_for_msg = ctx.selected_workflow or analysis.workflow_hint or ""
+        reply = sanitize_customer_text(
+            amount_mismatch_message(wf_for_msg, claimed_val, verified_val)
+        )
+        _record_turn(ctx, "agent", reply)
+        if req.session_id:
+            _session_context[req.session_id] = ctx
+        logger.info(
+            "[CustomerChat] amount_mismatch: claimed=%s verified=%s entity=%s "
+            "— claim NOT merged into evidence, honest correction sent",
+            claimed_val, verified_val, resolution.resolved_entity_id,
+        )
+        return CustomerChatResponse(
+            public_case_id=ctx.case_id or "pending",
+            status="need_more_info",
+            public_response=reply,
+            missing_info_questions=[],
+        )
+
     logger.info(
         "[CustomerChat] Resolver: status=%s, entity=%s, id_exists=%s, "
         "candidates=%s, missing_after_subtract=%s",
@@ -765,6 +1182,115 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
         "has_bank": bool(analysis.extracted.bank_name),
         "has_reference": bool(analysis.extracted.bank_reference),
     }
+
+    # ── Step 6e: Recheck context — compare current vs previous status ──
+    # When the customer asks "khi nào nhận tiền?", "tình trạng sao rồi?",
+    # or "kiểm tra lại giúp tôi" we re-query every time (the resolver
+    # already does this). Here we detect whether the result changed so
+    # the composer can say "status updated" vs "still the same".
+    recheck_context: dict | None = None
+    if (
+        analysis.message_type in (
+            "ask_status", "follow_up", "ask_what_happened",
+            "ask_eta", "ask_what_to_do",
+        )
+        and resolution.resolution_status == "resolved"
+        and ctx.last_diagnosis
+    ):
+        old_status = ctx.last_diagnosis.get("verified_status", "")
+        new_status = resolution.verified_status or ""
+        recheck_context = {
+            "is_recheck": True,
+            "status_changed": old_status != new_status and bool(old_status),
+            "old_status": old_status,
+            "new_status": new_status,
+        }
+        logger.info(
+            "[CustomerChat] Recheck: old=%s new=%s changed=%s",
+            old_status, new_status, recheck_context["status_changed"],
+        )
+
+    # ── Step 6c: No matching data on the logged-in account ──
+    # The system could not find anything for this trusted session. Say so
+    # clearly and immediately — never imply the transaction exists / is being
+    # processed, and do not run the workflow or create a case for it.
+    _ex = analysis.extracted
+    _has_searchable = any([
+        _ex.transaction_id, _ex.order_id, _ex.bill_code, _ex.amount,
+        _ex.bank_name, _ex.bank_reference,
+        _ex.approximate_time_text, _ex.approximate_date_text,
+    ])
+    prior_no_match = getattr(ctx, "_no_match_count", 0)
+    is_no_match = resolution.resolution_status == "no_match"
+    # Insistence: customer reasserts after a prior 'not found' but brings no new
+    # searchable evidence and the system still cannot verify anything.
+    is_insist = (
+        prior_no_match >= 1
+        and not _has_searchable
+        and not resolution.resolved_entity_id
+        and resolution.resolution_status in ("no_match", "need_more_info")
+    )
+
+    if is_no_match or is_insist:
+        ctx._no_match_count = prior_no_match + 1
+        # Account-lock no-match is about the ACCOUNT record, not a transaction —
+        # repeating the transaction-insist wording would be the wrong domain.
+        _is_account_no_match = (
+            resolution.resolved_entity_type == "account"
+            or (ctx.selected_workflow or analysis.workflow_hint) == "fraud_account_lock"
+        )
+        if is_insist or prior_no_match >= 1:
+            reply = (
+                no_lock_evidence_message() if _is_account_no_match
+                else NO_MATCH_INSIST_RESPONSE
+            )
+        else:
+            reply = resolution.public_response or (
+                no_lock_evidence_message() if _is_account_no_match
+                else NO_MATCH_INSIST_RESPONSE
+            )
+            reminder = policy.get("global_safety_reminder", "")
+            if reminder and reminder.lower() not in reply.lower():
+                reply = f"{reply} {reminder}".strip()
+
+        reply = sanitize_customer_text(reply)
+        _record_turn(ctx, "agent", reply)
+        if req.session_id:
+            _session_context[req.session_id] = ctx
+
+        logger.info(
+            "[CustomerChat] no_match/insist on session=%s (count=%d, status=%s) "
+            "— honest 'not found' reply, no fake confirmation",
+            req.session_id or "anonymous", ctx._no_match_count,
+            resolution.resolution_status,
+        )
+        return CustomerChatResponse(
+            public_case_id=ctx.case_id or "pending",
+            status="need_more_info",
+            public_response=reply,
+            missing_info_questions=[],
+        )
+
+    # ── Step 6d: Several matching records → ask ONE narrowing field ──
+    if resolution.resolution_status == "multiple_candidates" and resolution.public_response:
+        reply = sanitize_customer_text(resolution.public_response)
+        _record_turn(ctx, "agent", reply)
+        if req.session_id:
+            _session_context[req.session_id] = ctx
+        logger.info(
+            "[CustomerChat] multiple_candidates on session=%s — asked one narrowing field",
+            req.session_id or "anonymous",
+        )
+        return CustomerChatResponse(
+            public_case_id=ctx.case_id or "pending",
+            status="need_more_info",
+            public_response=reply,
+            missing_info_questions=[],
+        )
+
+    # Customer eventually resolved → reset the no-match streak.
+    if resolution.resolution_status == "resolved":
+        ctx._no_match_count = 0
 
     # ── Step 7: If new complaint or no resolver match → run workflow ──
     state: dict | None = None
@@ -818,7 +1344,32 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
         analysis.workflow_hint if analysis.workflow_hint != "unknown" else ""
     )
     if state is not None and state.get("selected_workflow"):
-        workflow = state.get("selected_workflow")
+        graph_wf = state.get("selected_workflow")
+        analyzer_wf = analysis.workflow_hint if analysis.workflow_hint != "unknown" else ""
+        # RULE: The per-message analyzer's workflow_hint takes priority over
+        # the graph's selected_workflow. The graph extracts from the enriched
+        # complaint text which may contain profile metadata; the analyzer
+        # extracts from the raw customer message only.
+        # The graph should only override when the analyzer couldn't determine
+        # the workflow (returned unknown/"").
+        if analyzer_wf and analyzer_wf != graph_wf:
+            logger.info(
+                "[CustomerChat] Analyzer workflow (%s) overrides graph workflow (%s) "
+                "— latest customer message determines routing",
+                analyzer_wf, graph_wf,
+            )
+            workflow = analyzer_wf
+        else:
+            workflow = graph_wf
+        # Re-run the resolver if the workflow changed from what was initially set.
+        if (
+            workflow
+            and workflow != analysis.workflow_hint
+            and resolution.resolution_status != "resolved"
+        ):
+            analysis.workflow_hint = workflow
+            resolution = resolve_case_evidence(session, case_context, analysis)
+            raw_evidence = resolution.public_safe_evidence or {}
 
     public_evidence = to_public_safe_evidence(
         raw_evidence=raw_evidence,
@@ -828,6 +1379,36 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
         resolution_status=resolution.resolution_status,
         missing_info=resolution.missing_info,
     )
+
+    # ── Step 8b: Workflow identity assertion ──
+    # Hard check: if the analysis says fraud_account_lock but the composition
+    # workflow drifted to wallet_topup (or vice versa), re-run the resolver
+    # for the correct workflow. This catches edge cases where the state graph
+    # overrides the workflow to something the analyzer didn't intend.
+    _analysis_wf = analysis.workflow_hint or ""
+    if (
+        _analysis_wf
+        and _analysis_wf != "unknown"
+        and workflow
+        and workflow != _analysis_wf
+        and state is None  # only for follow-up path; new-complaint path trusts the graph
+    ):
+        logger.warning(
+            "[CustomerChat] Workflow identity mismatch at composition: "
+            "analysis=%s, composition=%s — re-running resolver",
+            _analysis_wf, workflow,
+        )
+        workflow = _analysis_wf
+        resolution = resolve_case_evidence(session, case_context, analysis)
+        raw_evidence = resolution.public_safe_evidence or {}
+        public_evidence = to_public_safe_evidence(
+            raw_evidence=raw_evidence,
+            rule_result=rule_result,
+            workflow=workflow,
+            policy=policy,
+            resolution_status=resolution.resolution_status,
+            missing_info=resolution.missing_info,
+        )
 
     # Populate trace: diagnosis
     trace.populate_diagnosis(public_evidence)
@@ -850,22 +1431,57 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
             elif isinstance(ei, dict):
                 missing_fields = list(ei.get("missing_fields", []))
 
-        safe_questions = _build_safe_questions(missing_fields, session=session)
+        safe_questions = compose_contextual_questions(
+            missing_fields=missing_fields,
+            extracted_info=dict(ctx.extracted_info),
+            workflow=workflow,
+            public_safe_diagnosis=public_evidence,
+            customer_message=req.message,
+            session=session,
+        )
+
+        # If the proactive account scan already found and diagnosed the
+        # problematic transaction, answer the customer from THAT diagnosis —
+        # don't fall back to a generic "đang xác định" or interrogate them.
+        proactively_resolved = (
+            resolution.resolution_status == "resolved"
+            and bool(public_evidence.get("customer_safe_cause"))
+        )
 
         customer_status = _map_to_customer_status(internal_status)
-        if safe_questions and customer_status != "need_more_info":
+        if proactively_resolved:
+            safe_questions = []           # nothing to ask — we already found it
+            customer_status = "processing"
+        elif safe_questions and customer_status != "need_more_info":
             customer_status = "need_more_info"
 
+        if proactively_resolved:
+            composed = compose_customer_response(
+                customer_message=req.message,
+                message_analysis=analysis,
+                active_case_context=case_context,
+                public_safe_evidence=public_evidence,
+                resolution_status=resolution.resolution_status,
+                contradictions=getattr(ctx, "_contradictions", None),
+            )
+            guardrail = check_response_safety(
+                composed.public_message, policy,
+                workflow=workflow, diagnosis=public_evidence,
+            )
+            final_response = (
+                composed.public_message
+                if guardrail.is_safe
+                else (guardrail.sanitized_text or composed.public_message)
+            )
         # Run guardrail on workflow response (workflow-aware).
         # The workflow's customer_reply_draft is STAFF-oriented and can leak
         # internal action wording (e.g. "manual payout draft") or overpromise.
         # If it is unsafe, we do NOT fall back to a fixed phrase — we re-compose
         # the reply from the public-safe diagnosis, then re-check it.
-        guardrail = check_response_safety(
+        elif (guardrail := check_response_safety(
             workflow_response, policy,
             workflow=workflow, diagnosis=public_evidence,
-        )
-        if guardrail.is_safe:
+        )).is_safe:
             final_response = workflow_response
         else:
             logger.warning(
@@ -879,6 +1495,7 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
                 active_case_context=case_context,
                 public_safe_evidence=public_evidence,
                 resolution_status=resolution.resolution_status,
+                contradictions=getattr(ctx, '_contradictions', None),
             )
             guardrail = check_response_safety(
                 recomposed.public_message, policy,
@@ -889,6 +1506,11 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
                 if guardrail.is_safe
                 else (guardrail.sanitized_text or recomposed.public_message)
             )
+
+        # Strip any backend field names before the text reaches the customer.
+        final_response = sanitize_customer_text(final_response)
+        final_response = _apply_evidence_grounding(final_response, resolution, ctx, workflow)
+        safe_questions = [sanitize_customer_text(q) for q in safe_questions]
 
         logger.info(
             "[CustomerChat] New case %s. status=%s, questions=%d",
@@ -919,12 +1541,13 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
             _session_context[req.session_id] = ctx
 
         # ── Proactive back-office ticket creation ──
-        # Create/update a ChatTicket immediately after the case is built so the
-        # dashboard is populated even if the /handoff endpoint is never called
-        # (process restart, TTL expiry with lost context, etc.).
+        # Create/update a ChatTicket when the case warrants staff attention.
+        # Do NOT create tickets for off-topic, greeting, or fully-resolved-in-chat cases.
         if session is not None and req.session_id and case_id and case_id != "pending":
             _proactive_ctx = _session_context.get(req.session_id)
-            if _proactive_ctx is not None:
+            if _proactive_ctx is not None and _should_create_ticket(
+                analysis, resolution, state, _proactive_ctx,
+            ):
                 try:
                     finalize_customer_chat_and_handoff(
                         session, _proactive_ctx,
@@ -959,14 +1582,50 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
     # diagnosis built when the case was created. This keeps follow-ups specific
     # (e.g. "tiền giải ngân kẹt ở đâu?" answers from the settlement diagnosis)
     # instead of degrading to a generic "đang kiểm tra".
+    #
+    # GUARD: Only reuse if the diagnosis workflow matches the current workflow.
+    # After a workflow switch, last_diagnosis may contain data from the OLD
+    # workflow (e.g. wallet_topup diagnosis when the customer now has a
+    # fraud_account_lock complaint). Reusing it would produce wrong wording.
+    _diag_wf = (ctx.last_diagnosis or {}).get("workflow", "")
+    _current_wf = analysis.workflow_hint or ""
+    # EVIDENCE-BINDING GUARD: the old diagnosis is bound to the verified
+    # transaction it was built from. If the customer's accumulated amount claim
+    # now conflicts with that bound verified amount, the diagnosis is stale for
+    # this claim — never reuse it (the claim must NOT inherit verified facts).
+    _bound_amount = getattr(
+        getattr(ctx, "_verified_evidence", None), "verified_amount", None,
+    )
+    _claim_amount = analysis.extracted.amount
+    _claim_conflicts_binding = (
+        _bound_amount is not None
+        and _claim_amount is not None
+        and int(_claim_amount) != int(_bound_amount)
+    )
     if (
         state is None
         and ctx.last_diagnosis
         and resolution.resolution_status != "resolved"
+        and not _claim_conflicts_binding
+        and (_diag_wf == _current_wf or not _current_wf or _current_wf == "unknown")
     ):
         public_evidence = dict(ctx.last_diagnosis)
         workflow = public_evidence.get("workflow") or workflow
         trace.populate_diagnosis(public_evidence)
+    elif (
+        state is None
+        and ctx.last_diagnosis
+        and resolution.resolution_status != "resolved"
+        and (_diag_wf != _current_wf or _claim_conflicts_binding)
+    ):
+        # Stale diagnosis (different workflow, or claim now conflicts with the
+        # bound verified amount) — discard and let the resolver's fresh result
+        # (even if thin) drive the response.
+        logger.info(
+            "[CustomerChat] Discarding stale last_diagnosis: "
+            "diag_wf=%s, current_wf=%s, claim_conflicts_binding=%s",
+            _diag_wf, _current_wf, _claim_conflicts_binding,
+        )
 
     # For follow-ups and resolver-handled cases
     composed = compose_customer_response(
@@ -975,6 +1634,8 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
         active_case_context=case_context,
         public_safe_evidence=public_evidence,
         resolution_status=resolution.resolution_status,
+        contradictions=getattr(ctx, '_contradictions', None),
+        recheck_context=recheck_context,
     )
 
     # ── Step 10: Output guardrail (workflow-aware) ──
@@ -995,13 +1656,23 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
         )
 
     # Build safe questions from resolver missing info (already subtracted)
-    safe_questions = _build_safe_questions(
-        resolution.missing_info, session=session,
+    safe_questions = compose_contextual_questions(
+        missing_fields=resolution.missing_info,
+        extracted_info=dict(ctx.extracted_info),
+        workflow=workflow,
+        public_safe_diagnosis=public_evidence,
+        customer_message=req.message,
+        session=session,
     )
 
     # If resolver resolved AND no remaining questions, clear the card
     if resolution.resolution_status == "resolved" and not safe_questions:
         safe_questions = []
+
+    # Strip any backend field names before the text reaches the customer.
+    final_message = sanitize_customer_text(final_message)
+    final_message = _apply_evidence_grounding(final_message, resolution, ctx, workflow)
+    safe_questions = [sanitize_customer_text(q) for q in safe_questions]
 
     # Determine status
     if safe_questions or composed.needs_more_info or resolution.resolution_status in (

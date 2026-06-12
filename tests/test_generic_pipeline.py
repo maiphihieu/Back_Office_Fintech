@@ -104,7 +104,7 @@ class TestGroupA_DiverseExtractionWordings:
         ]
         for msg in messages:
             fields = _fallback_extract_fields(msg)
-            msg_type, conf = _fallback_classify(
+            msg_type, conf, _is_correction = _fallback_classify(
                 msg, fields,
                 has_active_case=True,
                 awaiting_field="transaction_id",

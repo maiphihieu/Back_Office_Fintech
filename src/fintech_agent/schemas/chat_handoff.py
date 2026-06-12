@@ -120,6 +120,11 @@ class ChatHandoffTicket:
     # ── Audit log (in-memory, per-ticket) ──
     audit_log: list[dict] = field(default_factory=list)
 
+    # ── Customer Claims vs Verified Evidence (data-driven) ──
+    customer_claims_data: list[dict] = field(default_factory=list)
+    verified_evidence_data: list[dict] = field(default_factory=list)
+    contradictions_data: list[dict] = field(default_factory=list)
+
     created_at: str = field(default_factory=lambda: _now().isoformat())
     updated_at: str = field(default_factory=lambda: _now().isoformat())
 

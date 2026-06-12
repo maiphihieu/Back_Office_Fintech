@@ -291,7 +291,13 @@ def mock_extract(complaint: str, user_id: str | None = None) -> ExtractedInfo:
             service_type = "wallet_topup"
 
     if not service_type:
-        lower = complaint.lower()
+        # Strip identity metadata brackets ("[Label: value]") that were injected
+        # by _build_complaint_with_identity. These contain session fields like
+        # display_name which must NEVER influence workflow routing.
+        _complaint_for_routing = re.sub(r"\[(?:User ID|Wallet ID|Merchant ID|"
+                                        r"SĐT|Email|Tên|MST|Phone|Name)[:\s][^\]]*\]",
+                                        "", complaint, flags=re.IGNORECASE)
+        lower = _complaint_for_routing.lower()
         # Merchant settlement MUST come before wallet_topup because
         # both may mention "ngân hàng" / "bank" — merchant keywords are more specific.
         if any(kw in lower for kw in (

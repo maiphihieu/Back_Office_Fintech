@@ -28,6 +28,8 @@ export interface MeResponse {
   display_name: string;
   role: string;
   is_authenticated: boolean;
+  /** Changes on every backend restart → reset a stale chat when it differs. */
+  server_instance_id?: string;
 }
 
 const STORAGE_KEY_SESSION_ID = 'customer_session_id';

@@ -202,10 +202,19 @@ workflows:
       status_field: account_status
       status_map:
         under_review: account_verification
-        locked: account_verification
-        restricted: account_verification
+        locked: account_locked
+        restricted: account_locked
         active: account_active
       situations:
+        account_locked:
+          issue_location: bước xác minh an toàn tài khoản
+          cause: >-
+            Tài khoản của bạn hiện đang bị tạm khóa và đang được bộ phận an ninh
+            xem xét để đảm bảo an toàn. Đây là biện pháp bảo vệ tài khoản; bộ phận
+            phụ trách sẽ tiếp tục xử lý và cập nhật kết quả cho bạn.
+          facts:
+            - tài khoản đang bị tạm khóa
+            - đang được bộ phận an ninh xem xét
         account_verification:
           issue_location: bước xác minh an toàn tài khoản
           cause: >-

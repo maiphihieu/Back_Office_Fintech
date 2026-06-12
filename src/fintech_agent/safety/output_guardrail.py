@@ -70,6 +70,8 @@ _HARDCODED_BLOCKED_PATTERNS: list[re.Pattern] = [
     re.compile(r"thanh\s+toán\s+thủ\s+công", re.IGNORECASE),
     re.compile(r"\btạo\s+(?:một\s+)?draft\b", re.IGNORECASE),
     re.compile(r"\bdraft\s+(?:manual\s+)?(?:payout|thanh\s+toán)", re.IGNORECASE),
+    # Internal "draft" wording in Vietnamese ("tạo bản nháp …") — staff-only.
+    re.compile(r"\b(?:tạo|một)\s+bản\s+nháp\b", re.IGNORECASE),
     # Payout / money-movement OVERPROMISES — block immediacy & guarantees
     re.compile(r"đảm\s+bảo\s+(?:bạn\s+)?(?:sẽ\s+)?nhận\s+được\s+(?:số\s+)?tiền", re.IGNORECASE),
     re.compile(r"chắc\s+chắn\s+(?:sẽ\s+)?nhận\s+được\s+(?:số\s+)?tiền", re.IGNORECASE),
@@ -92,6 +94,184 @@ _SENSITIVE_REQUEST_PATTERNS: list[re.Pattern] = [
     # English equivalents
     re.compile(r"(?:please\s+)?(?:provide|send|enter)\s+(?:your\s+)?(?:PIN|OTP|password|card\s+number)", re.IGNORECASE),
 ]
+
+
+# ─── Customer-safe field-name sanitization ──────────────────────
+#
+# Backend field names must never reach the customer (req: use Vietnamese
+# labels, not transaction_id/bank_reference/...). This is a generic token→label
+# rewrite, applied to every customer-facing string — not phrase matching.
+_FIELD_LABELS: dict[str, str] = {
+    "transaction_id": "mã giao dịch",
+    "transaction_time": "thời gian giao dịch",
+    "bank_reference": "mã tham chiếu ngân hàng",
+    "bank_name": "ngân hàng",
+    "order_id": "mã đơn hàng",
+    "bill_code": "mã hóa đơn",
+    "customer_code": "mã khách hàng",
+    "payout_id": "mã thanh toán",
+    "batch_id": "mã lô thanh toán",
+    "merchant_id": "mã đối tác",
+    "provider_ref_id": "mã tham chiếu nhà cung cấp",
+    "user_id": "tài khoản",
+    "wallet_id": "ví",
+    "amount": "số tiền",
+}
+
+# Longest tokens first so e.g. "transaction_id" is replaced before "amount".
+_FIELD_TOKEN_RE = re.compile(
+    r"(?<![\w])(" + "|".join(
+        re.escape(k) for k in sorted(_FIELD_LABELS, key=len, reverse=True)
+    ) + r")(?![\w])",
+    re.IGNORECASE,
+)
+# A parenthetical that wraps ONLY a field token, e.g. " (transaction_id)".
+_FIELD_PAREN_RE = re.compile(
+    r"\s*[\(\[]\s*(?:" + "|".join(re.escape(k) for k in _FIELD_LABELS) + r")\s*[\)\]]",
+    re.IGNORECASE,
+)
+
+
+def sanitize_customer_text(text: str) -> str:
+    """Replace any backend field name in customer-facing text with its label.
+
+    Drops redundant parentheticals like "mã giao dịch (transaction_id)" → keeps
+    only the label; replaces standalone tokens with their Vietnamese label.
+    """
+    if not text:
+        return text
+    # 1. Remove parentheticals that only restate a field name in English.
+    out = _FIELD_PAREN_RE.sub("", text)
+    # 2. Replace any remaining standalone English field tokens with labels.
+    out = _FIELD_TOKEN_RE.sub(lambda m: _FIELD_LABELS[m.group(1).lower()], out)
+    # 3. Tidy double spaces introduced by removals.
+    return re.sub(r"[ \t]{2,}", " ", out).strip()
+
+
+# ─── Evidence-grounding check (claim vs verified) ────────────────
+#
+# Confirmed-status wording may ONLY appear when the resolver actually verified
+# a record for the logged-in account, and any amount stated in the same
+# sentence must equal the VERIFIED amount — never the customer's claim.
+_CONFIRMED_STATUS_PATTERNS: list[re.Pattern] = [
+    re.compile(r"ngân\s+hàng\s+đã\s+xác\s+nhận", re.IGNORECASE),
+    re.compile(r"thanh\s+toán\s+đã\s+được\s+xác\s+nhận", re.IGNORECASE),
+    re.compile(r"đã\s+xác\s+nhận\s+(?:giao\s+dịch|thanh\s+toán)", re.IGNORECASE),
+    re.compile(r"giao\s+dịch\s+(?:đã\s+)?thành\s+công", re.IGNORECASE),
+    re.compile(r"số\s+dư\s+(?:ví\s+)?(?:chưa|đang\s+chờ)\s+(?:được\s+)?cập\s+nhật", re.IGNORECASE),
+    re.compile(r"đang\s+xử\s+lý\s+cập\s+nhật\s+ví", re.IGNORECASE),
+    re.compile(r"ví\s+(?:của\s+bạn\s+)?đã\s+nhận\s+(?:được\s+)?tiền", re.IGNORECASE),
+]
+
+# VND amount parsing inside a sentence: "500.000đ", "500000 đồng", "5 triệu", "500k"
+_VND_DIGIT_RE = re.compile(
+    r"(\d{1,3}(?:[.,]\d{3})+|\d{4,})\s*(?:đ\b|₫|vnd\b|đồng\b)", re.IGNORECASE,
+)
+_VND_UNIT_RE = re.compile(
+    r"(\d+(?:[.,]\d+)?)\s*(triệu|tr\b|nghìn|ngàn|k\b)", re.IGNORECASE,
+)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?\n])\s+")
+
+# Account-lock claims: wording that asserts the account IS locked / restricted /
+# under security review. Only verified account data may back these (the
+# customer saying "bị khóa" is a claim, not evidence). Negations ("không bị
+# khóa", "chưa thấy ... khóa") are excluded by the lookbehinds/lookaheads.
+_LOCK_CLAIM_PATTERNS: list[re.Pattern] = [
+    re.compile(
+        r"tài\s+khoản\s+(?:của\s+bạn\s+)?(?:hiện\s+)?đang\s+(?:bị\s+)?(?:tạm\s+)?(?:khóa|hạn\s+chế)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"đang\s+được\s+bộ\s+phận\s+(?:bảo\s+mật|an\s+ninh)\s+(?:xác\s+minh|xem\s+xét|kiểm\s+tra)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"bộ\s+phận\s+(?:bảo\s+mật|an\s+ninh)\s+đang\s+(?:kiểm\s+tra|xác\s+minh|xem\s+xét)",
+        re.IGNORECASE,
+    ),
+]
+
+
+def _extract_vnd_amounts(sentence: str) -> list[int]:
+    """Parse VND amounts mentioned in a sentence into integers."""
+    amounts: list[int] = []
+    for m in _VND_DIGIT_RE.finditer(sentence):
+        try:
+            amounts.append(int(m.group(1).replace(".", "").replace(",", "")))
+        except ValueError:
+            continue
+    for m in _VND_UNIT_RE.finditer(sentence):
+        try:
+            base = float(m.group(1).replace(",", "."))
+        except ValueError:
+            continue
+        unit = m.group(2).lower()
+        mult = 1_000_000 if unit in ("triệu", "tr") else 1_000
+        amounts.append(int(base * mult))
+    return amounts
+
+
+def check_evidence_grounding(
+    response_text: str,
+    *,
+    resolver_status: str,
+    verified_entity_id: str | None,
+    verified_amount: int | None,
+    fallback_text: str = "",
+    lock_evidence: bool | None = None,
+) -> GuardrailResult:
+    """Block confirmed-status wording that verified evidence does not support.
+
+    Rules (data-driven — values come from the resolver, nothing hard-coded):
+      - Confirmed wording requires a verified entity on the logged-in account
+        (resolver_status resolved/amount_mismatch + verified_entity_id).
+      - Any amount in the SAME sentence as confirmed wording must equal the
+        verified amount, never the customer's claimed amount.
+      - Account-lock claims ("đang bị khóa", "đang được bộ phận bảo mật xác
+        minh", …) require lock_evidence=True from the account record; when
+        lock_evidence is None the lock check is skipped (non-account flows).
+    """
+    if not response_text:
+        return GuardrailResult(is_safe=True)
+
+    violations: list[str] = []
+    sentences = _SENTENCE_SPLIT_RE.split(response_text)
+    has_verified = (
+        resolver_status in ("resolved", "amount_mismatch", "verified_match", "contradiction")
+        and bool(verified_entity_id)
+    )
+
+    # Account-lock claims require verified lock evidence, not the customer's claim.
+    if lock_evidence is not True and lock_evidence is not None:
+        for p in _LOCK_CLAIM_PATTERNS:
+            m = p.search(response_text)
+            if m:
+                violations.append(f"unverified_lock_claim: {m.group(0)[:60]}")
+                break
+
+    for sent in sentences:
+        if not any(p.search(sent) for p in _CONFIRMED_STATUS_PATTERNS):
+            continue
+        if not has_verified:
+            violations.append(f"unverified_confirmation: {sent[:80]}")
+            continue
+        if verified_amount is not None:
+            for amt in _extract_vnd_amounts(sent):
+                if amt != int(verified_amount):
+                    violations.append(
+                        f"claim_amount_in_confirmed_statement: {amt} != verified {verified_amount}"
+                    )
+
+    if not violations:
+        return GuardrailResult(is_safe=True)
+
+    logger.warning(
+        "[Guardrail] Evidence grounding blocked response (%d violations): %s",
+        len(violations), violations[:3],
+    )
+    return GuardrailResult(
+        is_safe=False, violations=violations, sanitized_text=fallback_text or None,
+    )
 
 
 def _terms_to_patterns(terms: list[str]) -> list[re.Pattern]:
@@ -142,6 +322,18 @@ _WALLET_WORDING_PATTERNS: list[re.Pattern] = [
     re.compile(r"số\s+dư\s+ví", re.IGNORECASE),
 ]
 
+# Topup-transaction wording that must not appear in non-wallet workflows
+# (e.g. fraud_account_lock, train_ticket, merchant_settlement_delay)
+# unless the diagnosis explicitly concerns a wallet topup issue.
+_TOPUP_WORDING_PATTERNS: list[re.Pattern] = [
+    re.compile(r"ngân\s+hàng\s+(?:đã\s+)?xác\s+nhận\s+giao\s+dịch", re.IGNORECASE),
+    re.compile(r"giao\s+dịch\s+nạp\s+(?:ví|tiền)", re.IGNORECASE),
+    re.compile(r"ví\s+chưa\s+nhận\s+(?:được\s+)?tiền", re.IGNORECASE),
+    re.compile(r"nạp\s+tiền\s+(?:vào\s+)?ví", re.IGNORECASE),
+    re.compile(r"(?:kiểm\s+tra|xác\s+minh)\s+(?:giao\s+dịch\s+)?nạp\s+(?:tiền|ví)", re.IGNORECASE),
+    re.compile(r"giao\s+dịch\s+topup", re.IGNORECASE),
+]
+
 
 def _diagnosis_is_wallet_related(diagnosis: dict | None) -> bool:
     """True if the diagnosis explicitly concerns a wallet balance/credit issue."""
@@ -154,6 +346,33 @@ def _diagnosis_is_wallet_related(diagnosis: dict | None) -> bool:
         for k in ("likely_issue_location", "customer_safe_cause", "situation")
     ).lower()
     return "ví" in blob or "số dư" in blob
+
+
+# Train-ticket wording that must not appear in non-train workflows
+# unless the diagnosis is explicitly about a train-ticket issue.
+_TRAIN_WORDING_PATTERNS: list[re.Pattern] = [
+    re.compile(r"vé\s+(?:chưa\s+)?(?:được\s+)?phát\s+hành", re.IGNORECASE),
+    re.compile(r"nhà\s+cung\s+cấp\s+vé", re.IGNORECASE),
+    re.compile(r"đối\s+soát\s+vé", re.IGNORECASE),
+    re.compile(r"mã\s+vé\b", re.IGNORECASE),
+    re.compile(r"ticket_code", re.IGNORECASE),
+    re.compile(r"provider.{0,10}train", re.IGNORECASE),
+    re.compile(r"chưa\s+nhận\s+(?:được\s+)?vé", re.IGNORECASE),
+    re.compile(r"vé\s+tàu", re.IGNORECASE),
+]
+
+
+def _diagnosis_is_train_related(diagnosis: dict | None) -> bool:
+    """True if the diagnosis explicitly concerns a train-ticket issue."""
+    if not diagnosis:
+        return False
+    if str(diagnosis.get("workflow", "")).lower() == "train_ticket":
+        return True
+    blob = " ".join(
+        str(diagnosis.get(k, "") or "")
+        for k in ("likely_issue_location", "customer_safe_cause", "situation")
+    ).lower()
+    return "vé" in blob or "tàu" in blob or "ticket" in blob
 
 
 def check_response_safety(
@@ -204,6 +423,22 @@ def check_response_safety(
         for pattern in _WALLET_WORDING_PATTERNS:
             if pattern.search(response_text):
                 violations.append(f"cross_workflow_wallet_wording: {pattern.pattern}")
+
+    # 4b. Topup-transaction wording rejection for non-topup workflows.
+    #     "ngân hàng đã xác nhận giao dịch", "giao dịch nạp ví", etc.
+    #     must NOT appear in fraud_account_lock, train_ticket, etc.
+    if wf and wf not in ("wallet_topup", "") and not _diagnosis_is_wallet_related(diagnosis):
+        for pattern in _TOPUP_WORDING_PATTERNS:
+            if pattern.search(response_text):
+                violations.append(f"cross_workflow_topup_wording: {pattern.pattern}")
+
+    # 4c. Train-ticket wording rejection for non-train workflows.
+    #     "vé chưa được phát hành", "nhà cung cấp vé", "đối soát vé", etc.
+    #     must NOT appear in wallet_topup, fraud_account_lock, etc.
+    if wf and wf != "train_ticket" and not _diagnosis_is_train_related(diagnosis):
+        for pattern in _TRAIN_WORDING_PATTERNS:
+            if pattern.search(response_text):
+                violations.append(f"cross_workflow_train_wording: {pattern.pattern}")
 
     if not violations:
         return GuardrailResult(is_safe=True)

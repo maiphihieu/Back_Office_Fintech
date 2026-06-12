@@ -129,6 +129,10 @@ export default function ChatTicketDetailPage() {
   const diagnosis = t.agent_diagnosis;
   const checklist = t.evidence_checklist || [];
   const action = t.staff_action;
+  const moneyLocation = t.money_or_issue_location || diagnosis?.money_or_issue_location || '';
+  const missingEvidence = (t.missing_evidence && t.missing_evidence.length
+    ? t.missing_evidence
+    : diagnosis?.missing_evidence) || [];
   const isWalletUser = t.subject_type === 'wallet_user';
   const isMerchant = t.subject_type === 'merchant';
 
@@ -313,6 +317,34 @@ export default function ChatTicketDetailPage() {
             </div>
           </div>
 
+          {/* ═══ F. TIỀN / VẤN ĐỀ ĐANG NẰM Ở ĐÂU ═══ */}
+          {moneyLocation && (
+            <div className="cht-section">
+              <div className="cht-card">
+                <h3 className="cht-card-title">
+                  <span className="cht-icon">📍</span>
+                  Tiền / vấn đề đang nằm ở đâu
+                </h3>
+                <p className="cht-money-location">{moneyLocation}</p>
+                {diagnosis?.likely_bottleneck &&
+                  !diagnosis.likely_bottleneck.includes('Chưa xác định') && (
+                  <div className="cht-money-bottleneck">
+                    <span className="cht-money-bottleneck-label">Điểm nghẽn</span>
+                    <span>{diagnosis.likely_bottleneck}</span>
+                  </div>
+                )}
+                {missingEvidence.length > 0 && (
+                  <div className="cht-money-missing">
+                    <span className="cht-money-missing-label">⚠️ Bằng chứng còn thiếu</span>
+                    <ul>
+                      {missingEvidence.map((m, i) => <li key={i}>{m}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* ═══ D. EVIDENCE SUMMARY ═══ */}
           <div className="cht-section">
             <div className="cht-card">
@@ -327,13 +359,26 @@ export default function ChatTicketDetailPage() {
                     <span className={`cht-evidence-icon ${item.status}`}>
                       {EV_ICONS[item.status] || '❓'}
                     </span>
-                    <span className="cht-evidence-label">{item.label}</span>
+                    <span className="cht-evidence-label">
+                      {item.label}
+                      {item.detail && (
+                        <span className="cht-evidence-detail">{item.detail}</span>
+                      )}
+                    </span>
                     <span className={`cht-evidence-status ${item.status}`}>
                       {EV_STATUS_LABELS[item.status] || item.status}
                     </span>
                   </div>
                 ))}
               </div>
+
+              {/* Explicit missing-evidence callout (says exactly what is missing) */}
+              {checklist.some(it => it.status === 'missing') && (
+                <p className="cht-evidence-missing-note">
+                  ⚠️ Còn thiếu:{' '}
+                  {checklist.filter(it => it.status === 'missing').map(it => it.label).join(', ')}
+                </p>
+              )}
             </div>
           </div>
 

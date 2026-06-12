@@ -9,7 +9,6 @@ from __future__ import annotations
 import pytest
 
 from fintech_agent.llm.mock_extractor import mock_extract
-from fintech_agent.mcp_client.client import get_mcp_client
 from fintech_agent.nodes.draft_action import create_draft
 from fintech_agent.nodes.extract_info import extract_info
 from fintech_agent.nodes.fetch_evidence import fetch_evidence
@@ -249,13 +248,13 @@ class TestMCPFirstArchitecture:
             "draft_action imports directly from database — must go through MCP"
 
     def test_mcp_client_has_fraud_handlers(self):
-        """MCP client handler map includes all fraud tools."""
-        mcp = get_mcp_client()
-        handler_map = mcp._get_handler_map()
-        assert "get_account_status" in handler_map
-        assert "get_fraud_case" in handler_map
-        assert "create_unlock_account_draft" in handler_map
-        assert "create_request_documents_response_draft" in handler_map
+        """MCP server exposes all fraud tools."""
+        from fintech_agent.mcp_server.server import mcp
+        tool_names = mcp._tool_manager._tools.keys()
+        assert "get_account_status" in tool_names
+        assert "get_fraud_case" in tool_names
+        assert "create_unlock_account_draft" in tool_names
+        assert "create_request_documents_response_draft" in tool_names
 
     def test_no_dangerous_execution_in_production_code(self):
         """Scan production code for dangerous execution patterns."""

@@ -85,9 +85,9 @@ class MessageAnalysis:
     Replaces both old CustomerMessageAnalysis and FollowupAnalysis.
     """
     message_type: str = "unknown"
-    # new_complaint | follow_up | provide_missing_info | ask_status |
-    # ask_eta | ask_what_to_do | ask_where_money_is |
-    # provide_sensitive_info | unknown
+    # new_complaint | follow_up | provide_missing_info | correct_previous_info |
+    # ask_status | ask_eta | ask_what_to_do | ask_where_money_is |
+    # provide_sensitive_info | greeting | out_of_scope | unknown
     belongs_to_active_case: bool = False
     confidence: float = 0.0
     workflow_hint: str = "unknown"
@@ -96,6 +96,7 @@ class MessageAnalysis:
     extracted: ExtractedFields = field(default_factory=ExtractedFields)
     customer_goal: str = ""
     safe_next_step_needed: str = ""
+    is_correction: bool = False  # customer corrects a previous claim
 
 
 @dataclass
@@ -133,14 +134,23 @@ class ActiveCaseContext:
 SUPPORTED_MESSAGE_TYPES = frozenset({
     "new_complaint",
     "follow_up",
+    "workflow_switch",
     "provide_missing_info",
+    "correct_previous_info",
     "ask_status",
     "ask_eta",
     "ask_what_to_do",
     "ask_where_money_is",
     "provide_sensitive_info",
+    "greeting",
+    "thank_you",
+    "out_of_scope",
     "unknown",
 })
+
+# Intents that are NOT a complaint/case interaction. These must never be forced
+# into a financial workflow (no transaction_id ask, no case creation).
+NON_CASE_MESSAGE_TYPES = frozenset({"greeting", "out_of_scope"})
 
 
 # ─── LLM System Prompt ─────────────────────────────────────────
@@ -160,19 +170,42 @@ You receive:
 
 ## Message types:
 - new_complaint: customer describes a new problem not related to active case
-- follow_up: customer responds to an ongoing case (short or contextual)
+- follow_up: customer responds to the ONGOING case about the SAME service/issue
+- workflow_switch: there is an active case, and the customer now raises a problem \
+about a DIFFERENT service than the active case (e.g. active case is wallet_topup \
+but the customer now talks about a train ticket not received, an account being \
+locked, an electricity bill, or a merchant settlement). Set workflow_hint to the \
+NEW service the customer is now talking about, NOT the active case's workflow.
 - provide_missing_info: customer provides transaction ID, amount, time, bank, reference, etc.
+- correct_previous_info: customer corrects something they said before ("à tôi nhầm", \
+"không phải 500k mà 300k", "sai rồi, 200k mới đúng"). Set is_correction=true.
 - ask_status: customer asks about case progress ("đã xử lý chưa", "tình trạng")
 - ask_eta: customer asks how long it will take ("bao lâu nữa", "khi nào xong")
 - ask_what_to_do: customer asks what info they should provide ("cần cung cấp gì", "phải làm gì")
 - ask_where_money_is: customer asks where their money is ("tiền đang ở đâu")
 - provide_sensitive_info: customer sends PIN, OTP, password, full card number
+- greeting: pure greeting / small talk with no support request ("xin chào", \
+"bạn tên gì", "chào shop")
+- thank_you: customer acknowledges, thanks, or signals the conversation can end \
+("được rồi", "ok", "cảm ơn", "tôi hiểu rồi", "cảm ơn bạn", "thanks"). \
+IMPORTANT: if there is an active case and customer sends a short acknowledgement, \
+classify as thank_you — NOT greeting, NOT new_complaint, NOT unknown.
+- out_of_scope: request unrelated to wallet/payment/transaction/account support \
+for THIS app — e.g. general knowledge ("1+1 bằng mấy", "thời tiết"), jokes/chit-chat \
+("kể chuyện cười"), or services this app does NOT provide (đặt vé máy bay, vay tiền, \
+tư vấn chứng khoán). When in doubt between out_of_scope and a real complaint, prefer \
+the real complaint type.
 - unknown: cannot determine
 
 ## Critical rules:
+- greeting and out_of_scope are NOT complaints. For them set \
+belongs_to_active_case=false and workflow_hint="unknown". Do NOT invent a workflow \
+or transaction fields for these.
+- An active case does NOT turn an unrelated message into a follow_up. If the new \
+message is clearly greeting/out_of_scope, classify it as such even when a case exists.
 - Short messages ("không nhớ", "bao lâu", "tiền đâu") MUST be interpreted \
 relative to active_case_context if it exists.
-- If no active case exists and message is short/vague, classify as new_complaint.
+- If no active case exists and message is short/vague but on-topic, classify as new_complaint.
 - Vietnamese slang: "nửa triệu"=500000, "5 lít"=500000, "5 củ"=5000000, \
 "500k"=500000, "1tr"=1000000.
 - Extract amounts as integers in VND.
@@ -183,6 +216,7 @@ Return ONLY this JSON:
 {
   "message_type": "...",
   "belongs_to_active_case": true/false,
+  "is_correction": true/false,
   "confidence": 0.0-1.0,
   "workflow_hint": "wallet_topup|fraud_account_lock|train_ticket|utility_bill|merchant_settlement_delay|unknown",
   "customer_emotion": "neutral|confused|worried|urgent|angry",
@@ -203,7 +237,13 @@ Return ONLY this JSON:
   },
   "customer_goal": "brief summary of what customer wants",
   "safe_next_step_needed": "brief description of what the system should do next"
-}"""
+}
+
+is_correction rules:
+- Set true when customer explicitly corrects previous info ("nhầm", "sai rồi", \
+"không phải X mà Y", "tôi nói sai").
+- When is_correction=true, message_type should be "correct_previous_info".
+- The extracted fields should contain the NEW (corrected) values."""
 
 
 # ─── LLM Analyzer ──────────────────────────────────────────────
@@ -293,6 +333,11 @@ def _parse_llm_response(parsed: dict) -> MessageAnalysis:
     if emotion not in ("neutral", "confused", "worried", "urgent", "angry"):
         emotion = "neutral"
 
+    is_correction = bool(parsed.get("is_correction", False))
+    # If LLM says correct_previous_info, ensure is_correction is True
+    if msg_type == "correct_previous_info":
+        is_correction = True
+
     return MessageAnalysis(
         message_type=msg_type,
         belongs_to_active_case=bool(parsed.get("belongs_to_active_case", False)),
@@ -302,6 +347,7 @@ def _parse_llm_response(parsed: dict) -> MessageAnalysis:
         extracted=extracted,
         customer_goal=parsed.get("customer_goal", ""),
         safe_next_step_needed=parsed.get("safe_next_step_needed", ""),
+        is_correction=is_correction,
     )
 
 
@@ -481,6 +527,10 @@ def _fallback_extract_fields(message: str) -> ExtractedFields:
     if _BANK_CONFIRMED_RE.search(message):
         issue_type = "bank_confirmed_wallet_pending"
 
+    # Service/issue type from account lock signal
+    if _ACCOUNT_LOCK_RE.search(message):
+        issue_type = issue_type or "account_locked"
+
     return ExtractedFields(
         transaction_id=txn_id,
         amount=amount,
@@ -493,49 +543,236 @@ def _fallback_extract_fields(message: str) -> ExtractedFields:
     )
 
 
+# Off-topic / greeting detection for the deterministic fallback (mock mode).
+# Conservative: only fires when the message has NO financial signal.
+_GREETING_RE = re.compile(
+    r"^(?:xin\s*chào|chào(?:\s+(?:shop|bạn|ad|anh|chị))?|hello|hi|hey|"
+    r"alo|a\s*lô|good\s+(?:morning|evening|afternoon)|"
+    r"bạn\s+tên\s+(?:là\s+)?gì|ban\s+ten\s+gi|bạn\s+là\s+ai)\b",
+    re.IGNORECASE,
+)
+_OUT_OF_SCOPE_RE = re.compile(
+    r"(thời\s*tiết|thoi\s*tiet|kể\s*(?:chuyện|truyện)|chuyện\s*cười|chuyen\s*cuoi|"
+    r"vé\s*máy\s*bay|ve\s*may\s*bay|đặt\s*vé\s*máy|vay\s*(?:tiền|tien|vốn)|cho\s*vay|"
+    r"chứng\s*khoán|chung\s*khoan|crypto|bitcoin|giá\s*vàng|gia\s*vang|"
+    r"bóng\s*đá|bong\s*da|nấu\s*ăn|nau\s*an|làm\s*thơ|lam\s*tho|viết\s*(?:văn|thơ)|"
+    r"bài\s*tập|dịch\s*(?:giúp|hộ)|mấy\s*giờ\s*rồi|hôm\s*nay\s*(?:là\s*)?thứ\s*mấy)",
+    re.IGNORECASE,
+)
+_MATH_RE = re.compile(
+    r"\b\d+\s*(?:[+\-*/x×]|cộng|trừ|nhân|chia)\s*\d+", re.IGNORECASE,
+)
+
+# Correction detection ("à tôi nhầm", "sai rồi", "không phải X mà Y")
+_CORRECTION_RE = re.compile(
+    r"(?:"
+    r"(?:à\s+)?(?:tôi|mình|em|t)\s+nhầm"
+    r"|sai\s+rồi"
+    r"|(?:tôi|mình|em)\s+(?:nói|nhập|ghi)\s+sai"
+    r"|không\s+phải\s+\S+\s*(?:mà|,)\s*"
+    r"|nhầm\s+(?:rồi|lẫn)"
+    r"|(?:lần\s+trước|ở\s+trên)\s+(?:tôi|mình|em)\s+nói\s+sai"
+    r"|thực\s+ra\s+(?:là|số\s+tiền)"
+    r")",
+    re.IGNORECASE,
+)
+
+# Thank-you / acknowledgement ("được rồi", "ok", "cảm ơn", "tôi hiểu rồi")
+# Only matches SHORT messages — a long message with "cảm ơn" embedded in a new
+# complaint should NOT be classified as thank_you.
+_THANK_YOU_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:cảm|cam)\s*ơn(?:\s+(?:bạn|anh|chị|shop|ad|nhé|nha|nhiều|lắm|nhá|ạ))?"
+    r"|(?:được|dc|đc)\s*(?:rồi|r)"
+    r"|ok(?:ay)?(?:\s+(?:bạn|anh|chị|nhé|ạ))?"
+    r"|(?:tôi|mình|em|t)\s+(?:hiểu|biết|nắm)\s+rồi"
+    r"|(?:tôi|mình|em|t)\s+hiểu"
+    r"|rồi\s+(?:ạ|nhé|nha)"
+    r"|vâng(?:\s+ạ)?"
+    r"|dạ(?:\s+(?:vâng|ok|được|ạ))?"
+    r"|uhm?(?:\s+(?:ok|được|rồi))?"
+    r"|thanks?(?:\s+you)?"
+    r"|thank\s+you"
+    r"|thôi\s+(?:được|đc)\s+rồi"
+    r"|(?:biết|nắm)\s+rồi"
+    r"|(?:tôi|mình|em)\s+ghi\s+nhận"
+    r")\s*[.!?]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def _has_financial_signal(extracted: ExtractedFields) -> bool:
+    """True when the message carries any wallet/payment evidence field."""
+    return any([
+        extracted.transaction_id, extracted.order_id, extracted.bill_code,
+        extracted.amount, extracted.bank_name, extracted.bank_reference,
+        extracted.approximate_time_text, extracted.approximate_date_text,
+        extracted.issue_type,
+    ])
+
+
+# ─── Account lock / fraud signal detection ──────────────────────
+# Detects when the customer is talking about an account lock/freeze, NOT topup.
+# Used by the fallback classifier to override workflow_hint when it would
+# otherwise default to the active case's workflow.
+
+_ACCOUNT_LOCK_RE = re.compile(
+    r"(?:"
+    r"(?:tài\s*khoản|tk)\s*(?:\w+\s+){0,4}(?:(?:bị|đã|đang)\s*)*(?:khóa|khoá|block|lock|hạn\s*chế|freeze|đóng\s*băng|chặn)"
+    r"|(?:bị|đã|đang)\s*khóa\s*(?:tài\s*khoản|tk)"
+    r"|không\s*(?:thể\s+)?(?:đăng\s*nhập|login|rút\s*tiền|chuyển\s*tiền|giao\s*dịch)\s*(?:được)?\s*(?:vì|do)?\s*(?:bị\s*)?(?:khóa|khoá|lock|hạn\s*chế|chặn)"
+    r"|khóa\s*(?:tài\s*khoản|tk|account)"
+    r"|account\s*(?:locked|blocked|frozen|restricted|suspended)"
+    r"|bảo\s*mật.*(?:khóa|khoá|hạn\s*chế)"
+    r"|(?:khóa|khoá)\s*(?:vô\s*cớ|bất\s*ngờ|đột\s*ngột)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+# ─── Wallet topup signal detection ──────────────────────────────
+# Detects when the customer is talking about a wallet topup issue.
+
+_WALLET_TOPUP_RE = re.compile(
+    r"(?:"
+    r"nạp\s*tiền(?:\s+vào\s+(?:ví|tài\s*khoản))?"
+    r"|ví\s*(?:chưa|không|vẫn)\s*(?:nhận|cập\s*nhật|thấy|hiện|báo)"
+    r"|nạp\s*ví"
+    r"|top\s*-?\s*up"
+    r"|bank\s*(?:đã\s*)?trừ\s*tiền"
+    r"|ngân\s*hàng\s*(?:đã\s*)?trừ"
+    r"|ví\s*vẫn\s*0"
+    r"|số\s*dư\s*ví"
+    r")",
+    re.IGNORECASE,
+)
+
+# ─── Train ticket signal detection ──────────────────────────────
+# Detects when the customer is talking about a train ticket issue.
+
+_TRAIN_TICKET_RE = re.compile(
+    r"(?:"
+    r"vé\s*tàu"
+    r"|mua\s*vé(?:\s+tàu)?"
+    r"|chưa\s*nhận\s*(?:được\s*)?vé"
+    r"|không\s*nhận\s*(?:được\s*)?vé"
+    r"|chưa\s*có\s*vé"
+    r"|thanh\s*toán\s*vé"
+    r"|đặt\s*vé"
+    r"|train\s*ticket"
+    r")",
+    re.IGNORECASE,
+)
+
+# ─── Merchant settlement signal detection ───────────────────────
+
+_MERCHANT_SETTLEMENT_RE = re.compile(
+    r"(?:"
+    r"giải\s*ngân"
+    r"|quyết\s*toán"
+    r"|payout"
+    r"|settlement"
+    r"|thanh\s*toán\s*d\+\d"
+    r"|chu\s*kỳ\s*d\+\d"
+    r"|merchant"
+    r"|cửa\s*hàng.*(?:chưa|chờ|chậm)\s*(?:nhận|thanh\s*toán)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _detect_workflow_hint_from_message(message: str) -> str | None:
+    """Detect a workflow hint purely from the message content.
+
+    Returns a workflow_id when the message has STRONG signals for a specific
+    workflow. Returns None if no strong signal is detected (caller should
+    fall back to the active case's workflow).
+
+    This catches cross-workflow misrouting in the fallback path — e.g. when
+    a customer with an active wallet_topup case says "tài khoản bị khóa",
+    or a customer with a train_ticket case says "nạp tiền vào ví".
+
+    Order matters — more specific patterns are checked first:
+    1. Account lock (most specific keywords)
+    2. Merchant settlement (domain-specific keywords)
+    3. Train ticket
+    4. Wallet topup (broadest keywords — checked last)
+    """
+    if _ACCOUNT_LOCK_RE.search(message):
+        return "fraud_account_lock"
+    if _MERCHANT_SETTLEMENT_RE.search(message):
+        return "merchant_settlement_delay"
+    if _TRAIN_TICKET_RE.search(message):
+        return "train_ticket"
+    if _WALLET_TOPUP_RE.search(message):
+        return "wallet_topup"
+    return None
+
+
 def _fallback_classify(
     message: str,
     extracted: ExtractedFields,
     has_active_case: bool,
     awaiting_field: str,
-) -> tuple[str, float]:
+) -> tuple[str, float, bool]:
     """Generic deterministic classification.
+
+    Returns (message_type, confidence, is_correction).
 
     Rules:
     1. Sensitive info → provide_sensitive_info
-    2. Direct ID → provide_missing_info
-    3. Alternative fields when awaiting → provide_missing_info
-    4. Short msg + active case → follow_up
-    5. Default → new_complaint (long) or unknown (short)
+    2. Correction ("à tôi nhầm") → correct_previous_info
+    3. Off-topic / greeting (no financial signal) → out_of_scope / greeting
+    4. Direct ID → provide_missing_info
+    5. Alternative fields when awaiting → provide_missing_info
+    6. Short msg + active case → follow_up
+    7. Default → new_complaint (long) or unknown (short)
     """
     msg = message.strip()
 
     # 1. Sensitive info always wins
     if _SENSITIVE_INFO_RE.search(msg):
-        return "provide_sensitive_info", 0.95
+        return "provide_sensitive_info", 0.95, False
 
-    # 2. Direct ID provided
+    # 2. Correction detection — before off-topic check
+    if has_active_case and _CORRECTION_RE.search(msg):
+        return "correct_previous_info", 0.9, True
+
+    # 2.5 Thank-you / acknowledgement — must come BEFORE greeting/off-topic
+    #     so "được rồi", "ok", "cảm ơn" don't fall into greeting or follow_up.
+    if _THANK_YOU_RE.search(msg) and len(msg) < 60:
+        return "thank_you", 0.9, False
+
+    # 3. Off-topic / greeting — only when there is no financial signal at all,
+    #    so a real complaint is never misclassified.
+    if not _has_financial_signal(extracted):
+        if _OUT_OF_SCOPE_RE.search(msg) or _MATH_RE.search(msg):
+            return "out_of_scope", 0.85, False
+        if _GREETING_RE.search(msg) and len(msg) < 40:
+            return "greeting", 0.8, False
+
+    # 4. Direct ID provided
     if extracted.transaction_id or extracted.order_id or extracted.bill_code:
-        return "provide_missing_info", 0.9
+        return "provide_missing_info", 0.9, False
 
-    # 3. Alternative fields
+    # 5. Alternative fields
     has_alt = any([
         extracted.amount, extracted.approximate_time_text,
         extracted.approximate_date_text, extracted.bank_name,
         extracted.bank_reference, extracted.issue_type,
     ])
     if has_alt and has_active_case:
-        return "provide_missing_info", 0.85
+        return "provide_missing_info", 0.85, False
 
-    # 4. Short message + active case → follow_up
+    # 6. Short message + active case → follow_up
     if has_active_case and len(msg) < 80:
-        return "follow_up", 0.7
+        return "follow_up", 0.7, False
 
-    # 5. Long message → new_complaint
+    # 7. Long message → new_complaint
     if len(msg) > 30:
-        return "new_complaint", 0.6
+        return "new_complaint", 0.6, False
 
-    return "unknown", 0.3
+    return "unknown", 0.3, False
 
 
 def _fallback_analyze(
@@ -546,20 +783,51 @@ def _fallback_analyze(
     """Full fallback: extraction + classification."""
     has_active = bool(active_case_context.get("selected_workflow"))
     awaiting = active_case_context.get("awaiting_field", "")
+    active_workflow = active_case_context.get("selected_workflow", "unknown") or "unknown"
 
     extracted = _fallback_extract_fields(message)
-    msg_type, confidence = _fallback_classify(
+    msg_type, confidence, is_correction = _fallback_classify(
         message, extracted, has_active, awaiting,
     )
 
+    # Off-topic / greeting never belong to a case and carry no workflow.
+    if msg_type in NON_CASE_MESSAGE_TYPES:
+        return MessageAnalysis(
+            message_type=msg_type,
+            belongs_to_active_case=False,
+            confidence=confidence,
+            workflow_hint="unknown",
+            extracted=extracted,
+        )
+
+    # Detect if the message has a strong signal for a DIFFERENT workflow
+    # than the active case. This prevents cross-workflow misrouting where
+    # e.g. "tài khoản bị khóa" gets routed to wallet_topup because
+    # that's the active case.
+    detected_hint = _detect_workflow_hint_from_message(message)
+    if detected_hint and detected_hint != active_workflow and has_active:
+        # Clear cross-workflow reuse: this is a workflow switch
+        return MessageAnalysis(
+            message_type="workflow_switch" if has_active else "new_complaint",
+            belongs_to_active_case=False,
+            confidence=max(confidence, 0.85),
+            workflow_hint=detected_hint,
+            extracted=extracted,
+            is_correction=False,
+        )
+
+    # If the detected workflow matches the active case, or no signal,
+    # use the active case workflow as before.
+    workflow_hint = detected_hint or active_workflow
     belongs = msg_type not in ("new_complaint", "unknown") and has_active
 
     return MessageAnalysis(
         message_type=msg_type,
         belongs_to_active_case=belongs,
         confidence=confidence,
-        workflow_hint=active_case_context.get("selected_workflow", "unknown") or "unknown",
+        workflow_hint=workflow_hint,
         extracted=extracted,
+        is_correction=is_correction,
     )
 
 

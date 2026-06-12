@@ -47,12 +47,16 @@ Money-impacting actions are draft-only and require human approval.
 - No `edit_ledger` tool
 - No `mark_transaction_success` tool
 
-## MCP Client modes
+## MCP Client transport
 
-Controlled by `FINTECH_TOOL_MODE` env var:
+All tool calls route through the MCP server over stdio (JSON-RPC 2.0):
 
-- `in_process` (default): Calls MCP handlers directly in-process
-- `mcp`: Calls MCP server via subprocess stdio transport
+    LangGraph node → FintechMCPClient → subprocess (stdio) → server.py → handlers.py
+
+The server command is configurable via env vars:
+
+- `FINTECH_MCP_COMMAND`: interpreter to run (default: current Python)
+- `FINTECH_MCP_ARGS`: server script + args (default: `scripts/run_mcp_server.py`)
 
 ## Running the MCP server standalone
 

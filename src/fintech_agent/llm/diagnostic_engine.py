@@ -630,6 +630,47 @@ def _diagnose_generic(
     )
 
 
+
+# ─── Custom diagnoser result wrapper ───────────────────────────
+
+
+def _wrap_custom_result(
+    raw: Any,
+    workflow: str,
+    diagnosis: str,
+    eb: dict[str, Any],
+) -> DiagnosticResult:
+    """Convert arbitrary custom diagnoser output into a DiagnosticResult.
+
+    Accepts dicts with fields like: can_explain_to_customer, issue_location,
+    customer_safe_explanation, confidence, etc.
+    """
+    if isinstance(raw, dict):
+        location = raw.get("issue_location", "unknown")
+        explanation = raw.get("customer_safe_explanation", "")
+        confidence = raw.get("confidence", "low")
+        requires_staff = raw.get("requires_staff_review", True)
+        missing = raw.get("missing_fields", [])
+
+        return DiagnosticResult(
+            bottleneck=Bottleneck(
+                location=location,
+                explanation=explanation,
+                evidence=[],
+                confidence=confidence,
+            ),
+            resolution=Resolution(
+                recommended_action="manual_review" if requires_staff else "inform_customer",
+                reason=explanation,
+                approval_required=requires_staff,
+            ),
+            missing_data=missing,
+        )
+
+    # Fallback: wrap unknown types as generic
+    return _diagnose_generic(workflow, diagnosis, eb)
+
+
 # ─── Public API ─────────────────────────────────────────────────
 
 
@@ -640,6 +681,11 @@ def diagnose(
     extracted_info: dict[str, Any] | None = None,
 ) -> DiagnosticResult:
     """Main entry point: produce structured diagnostic from case data.
+
+    Dispatch order:
+      1. Workflow registry custom diagnoser (if registered).
+      2. Built-in per-workflow functions (wallet_topup, fraud_account_lock).
+      3. Generic fallback.
 
     Args:
         workflow: Selected workflow (e.g. 'wallet_topup', 'fraud_account_lock').
@@ -652,12 +698,43 @@ def diagnose(
     """
     eb = _extract_evidence_dict(evidence_bundle)
 
-    if workflow == "wallet_topup":
-        result = _diagnose_wallet_topup(diagnosis, eb)
-    elif workflow == "fraud_account_lock":
-        result = _diagnose_fraud_account_lock(diagnosis, eb, extracted_info)
-    else:
-        result = _diagnose_generic(workflow, diagnosis, eb)
+    result: DiagnosticResult | None = None
+
+    # ── 1. Registry-based dispatch ──
+    try:
+        from fintech_agent.workflows.workflow_registry import get_registry
+
+        registry = get_registry()
+        spec = registry.get(workflow)
+        if spec and spec.diagnoser is not None:
+            logger.info(
+                "[DiagnosticEngine] Dispatching via registry: workflow=%s",
+                workflow,
+            )
+            result = spec.diagnoser(
+                diagnosis=diagnosis,
+                evidence_bundle=eb,
+                extracted_info=extracted_info,
+            )
+            # Wrap non-DiagnosticResult outputs (e.g. dicts) into a
+            # DiagnosticResult so the rest of the function can access
+            # .bottleneck/.resolution safely.
+            if result is not None and not isinstance(result, DiagnosticResult):
+                result = _wrap_custom_result(result, workflow, diagnosis, eb)
+    except Exception as exc:
+        logger.warning(
+            "[DiagnosticEngine] Registry dispatch failed for '%s': %s",
+            workflow, exc,
+        )
+
+    # ── 2. Built-in per-workflow functions ──
+    if result is None:
+        if workflow == "wallet_topup":
+            result = _diagnose_wallet_topup(diagnosis, eb)
+        elif workflow == "fraud_account_lock":
+            result = _diagnose_fraud_account_lock(diagnosis, eb, extracted_info)
+        else:
+            result = _diagnose_generic(workflow, diagnosis, eb)
 
     logger.info(
         "[DiagnosticEngine] workflow=%s, diagnosis=%s, "

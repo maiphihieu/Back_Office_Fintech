@@ -53,9 +53,16 @@ export interface ComplainantPublic {
 export interface AgentDiagnosisPublic {
   what_was_checked: string[];
   confirmed_facts: string[];
+  money_or_issue_location: string;
   likely_bottleneck: string;
   confidence: string;
   why_staff_action_needed: string;
+  missing_evidence: string[];
+}
+
+export interface ResolvedEntity {
+  type?: string;
+  id?: string;
 }
 
 export interface EvidenceCheckItem {
@@ -149,6 +156,10 @@ export interface ChatTicketDetail {
   updated_at: string;
   /* Actual extracted values (amount/time/bank/ids) — never placeholder labels */
   extracted_info?: Record<string, unknown>;
+  /* Investigation result (explicit, staff-facing) */
+  resolved_entity?: ResolvedEntity;
+  money_or_issue_location?: string;
+  missing_evidence?: string[];
   /* NEW structured fields */
   ticket_header?: TicketHeaderPublic | null;
   customer_problem_structured?: CustomerProblemPublic | null;

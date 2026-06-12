@@ -5117,6 +5117,68 @@ a:hover {
   flex: 1;
   font-weight: 500;
   color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cht-evidence-detail {
+  font-weight: 400;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.cht-evidence-missing-note {
+  margin: 10px 0 0;
+  font-size: 0.78rem;
+  color: var(--amber);
+  line-height: 1.4;
+}
+
+/* ─── Section F: money / issue location ─── */
+.cht-money-location {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+.cht-money-bottleneck {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.cht-money-bottleneck-label,
+.cht-money-missing-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.cht-money-bottleneck-label {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--blue-bg);
+  color: var(--blue);
+  border: 1px solid var(--blue-border);
+}
+
+.cht-money-missing {
+  margin-top: 12px;
+}
+
+.cht-money-missing ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 0.82rem;
+  color: var(--amber);
+  line-height: 1.5;
 }
 
 .cht-evidence-status {

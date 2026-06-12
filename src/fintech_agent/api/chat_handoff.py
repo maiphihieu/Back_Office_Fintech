@@ -149,10 +149,32 @@ _PLACEHOLDER_LABELS: frozenset[str] = frozenset({
     "mã hóa đơn",
     "mã khách hàng",
     "nhà cung cấp",
+    # Bare generic labels (value == the field name itself)
+    "số tiền",
+    "thời gian",
+    "ngày",
+    "thời gian giao dịch gần đúng",
+    "tên ngân hàng",
+    "mã tham chiếu",
+    "mã thanh toán",
+    "mã lô thanh toán",
+    "payout id",
+    "payout_id",
+    "merchant id",
+    "merchant_id",
+    "user id",
+    "user_id",
+    "wallet id",
+    "wallet_id",
     # Generic null-equivalents
     "unknown",
+    "none",
+    "null",
     "n/a",
+    "na",
     "không rõ",
+    "chưa rõ",
+    "chưa xác định",
     "transaction id",
     "transaction_id",
     "bank name",
@@ -223,8 +245,14 @@ def summarize_conversation(ctx: Any) -> dict:
     # for the staff ticket. Never expose to the customer chat frontend.
     safe_extracted: dict = {}
     for key, val in extracted.items():
-        if val is not None and not _is_placeholder_label(val):
-            safe_extracted[key] = val
+        if val is None or _is_placeholder_label(val):
+            continue
+        # Normalize numeric amounts to int so the UI/diagnosis format consistently
+        if key == "amount" and isinstance(val, str):
+            digits = val.strip().replace(".", "").replace(",", "").replace("đ", "").replace("vnd", "")
+            if digits.isdigit():
+                val = int(digits)
+        safe_extracted[key] = val
     if safe_extracted:
         logger.debug(
             "[Handoff] summarize_conversation extracted %d real fields: %s",
@@ -385,6 +413,28 @@ def finalize_customer_chat_and_handoff(
     ticket.risk_level = risk
     ticket.backoffice_ticket_status = status
     ticket.handoff_reason = reason
+
+    # ── Populate claims vs evidence data from ctx ──
+    _claims = getattr(ctx, "_customer_claims", None)
+    if _claims and hasattr(_claims, "to_summary"):
+        ticket.customer_claims_data = _claims.to_summary()
+
+    _evidence = getattr(ctx, "_verified_evidence", None)
+    if _evidence and hasattr(_evidence, "to_summary"):
+        ticket.verified_evidence_data = _evidence.to_summary()
+
+    _contradictions = getattr(ctx, "_contradictions", None)
+    if _contradictions:
+        ticket.contradictions_data = [
+            {
+                "field": getattr(c, "field", ""),
+                "customer_claim": getattr(c, "customer_claim", None),
+                "verified_value": getattr(c, "verified_value", None),
+                "severity": getattr(c, "severity", "medium"),
+            }
+            for c in _contradictions
+        ]
+
     ticket.touch()
 
     store.upsert(dedup_key, ticket)
@@ -422,9 +472,11 @@ class AgentDiagnosisPublic(BaseModel):
     """Staff-readable agent diagnosis."""
     what_was_checked: list[str] = Field(default_factory=list)
     confirmed_facts: list[str] = Field(default_factory=list)
+    money_or_issue_location: str = ""
     likely_bottleneck: str = ""
     confidence: str = "low"
     why_staff_action_needed: str = ""
+    missing_evidence: list[str] = Field(default_factory=list)
 
 
 class EvidenceCheckItem(BaseModel):
@@ -556,6 +608,10 @@ class ChatTicketDetail(BaseModel):
     updated_at: str = ""
     # ── Actual extracted values (real amounts/times/banks, never labels) ──
     extracted_info: dict = Field(default_factory=dict)
+    # ── Investigation result (explicit, staff-facing) ──
+    resolved_entity: dict = Field(default_factory=dict)   # {type, id}
+    money_or_issue_location: str = ""
+    missing_evidence: list[str] = Field(default_factory=list)
     # ── NEW structured fields for action-oriented UX ──
     ticket_header: TicketHeaderPublic | None = None
     customer_problem_structured: CustomerProblemPublic | None = None
@@ -564,6 +620,10 @@ class ChatTicketDetail(BaseModel):
     staff_action: StaffAction | None = None
     conversation_timeline: list[ChatMessagePublic] = Field(default_factory=list)
     audit_entries: list[AuditLogEntry] = Field(default_factory=list)
+    # ── Claims vs Evidence (data-driven, for staff review) ──
+    customer_claims_data: list[dict] = Field(default_factory=list)
+    verified_evidence_data: list[dict] = Field(default_factory=list)
+    contradictions_data: list[dict] = Field(default_factory=list)
 
 
 class TicketDecisionRequest(BaseModel):
@@ -931,15 +991,21 @@ def _build_agent_diagnosis(t: ChatHandoffTicket) -> AgentDiagnosisPublic:
             "Thông tin giao dịch do khách cung cấp",
         ]
 
-    bottleneck = (
-        ev.get("likely_issue_location", "")
+    # "Tiền/vấn đề đang nằm ở đâu" — where the money/problem currently is.
+    money_location = (
+        ev.get("money_or_issue_location", "")
+        or ev.get("likely_issue_location", "")
         or diag.get("likely_issue_location", "")
         or diag.get("customer_safe_cause", "")
     )
+    # "Likely bottleneck" — the stuck processing step (from the investigation,
+    # falling back to the money-location finding when not investigated).
+    bottleneck = ev.get("likely_bottleneck", "") or money_location
     confidence = t.diagnosis_confidence or diag.get("confidence", "low")
+    missing_evidence = list(ev.get("missing_evidence", []) or [])
 
     rule_diag = ev.get("rule_diagnosis", "")
-    why_needed = rule_diag or bottleneck
+    why_needed = rule_diag or money_location
     if not why_needed and t.issue_type:
         why_needed = f"Loại vấn đề: {t.issue_type}"
     if not why_needed and claims:
@@ -950,19 +1016,46 @@ def _build_agent_diagnosis(t: ChatHandoffTicket) -> AgentDiagnosisPublic:
     return AgentDiagnosisPublic(
         what_was_checked=what_checked,
         confirmed_facts=all_confirmed,
+        money_or_issue_location=str(money_location),
         likely_bottleneck=str(bottleneck) if bottleneck else "Chưa xác định đầy đủ — cần kiểm tra thêm",
         confidence=str(confidence),
         why_staff_action_needed=str(why_needed),
+        missing_evidence=missing_evidence,
     )
 
 
 def _build_evidence_checklist(t: ChatHandoffTicket) -> list[EvidenceCheckItem]:
-    """Produce checklist cards from diagnosis + evidence data."""
+    """Produce checklist cards from diagnosis + evidence data.
+
+    When an investigation has run, its per-source `evidence_summary` (each item
+    marked checked/missing) is authoritative — staff see exactly which data
+    sources were queried and which are missing.
+    """
     diag = t.public_safe_diagnosis or {}
     ev = t.internal_staff_evidence_summary or {}
     items: list[EvidenceCheckItem] = []
 
-    # What was checked → checked items
+    # ── Investigation path: explicit per-source checklist ──
+    evidence_summary = ev.get("evidence_summary")
+    if isinstance(evidence_summary, list) and evidence_summary:
+        for row in evidence_summary:
+            if not isinstance(row, dict):
+                continue
+            status = str(row.get("status", "missing"))
+            if status not in ("checked", "missing", "needs_review"):
+                status = "missing"
+            items.append(EvidenceCheckItem(
+                label=str(row.get("label", "")),
+                status=status,
+                detail=str(row.get("detail", "")),
+            ))
+        # Confirmed facts add concrete detail beyond the source checklist
+        for fact in ev.get("confirmed_public_facts", []) or []:
+            if not any(e.label == str(fact) for e in items):
+                items.append(EvidenceCheckItem(label=str(fact), status="checked"))
+        return items
+
+    # ── Fallback (chat-time data, no investigation) ──
     what_checked = ev.get("what_was_checked", []) or diag.get("what_was_checked", [])
     if isinstance(what_checked, list):
         for item in what_checked:
@@ -1030,14 +1123,24 @@ def _build_staff_action(t: ChatHandoffTicket) -> StaffAction:
     if not why:
         why = "Agent đã kiểm tra và đề xuất bước xử lý này"
 
-    # Preconditions checked
+    # Preconditions checked — prefer the investigation's concrete source list
     preconditions: list[str] = []
     missing: list[str] = []
-    what_checked = diag.get("what_was_checked", [])
-    if what_checked:
-        preconditions.append("Đã kiểm tra danh tính khách hàng")
+    inv_checked = ev.get("what_was_checked") or diag.get("what_was_checked", [])
+    inv_missing = ev.get("missing_evidence")
+    if isinstance(inv_checked, list) and inv_checked:
+        for label in inv_checked:
+            preconditions.append(f"Đã kiểm tra: {label}")
+    elif inv_checked:
         preconditions.append("Đã kiểm tra bằng chứng giao dịch")
-    else:
+    # Explicit missing-evidence from the investigation (says exactly what is missing)
+    if isinstance(inv_missing, list) and inv_missing:
+        for label in inv_missing:
+            entry = f"Thiếu: {label}"
+            if entry not in missing:
+                missing.append(entry)
+    elif not inv_checked:
+        # No investigation data at all — generic fallback only as a last resort.
         missing.append("Chưa kiểm tra đầy đủ bằng chứng")
     if t.linked_action_draft_id:
         preconditions.append("Đã tạo action draft")
@@ -1072,6 +1175,113 @@ def _build_staff_action(t: ChatHandoffTicket) -> StaffAction:
         recommended_action_type=action_type,
         required_preconditions=preconditions,
     )
+
+
+# ─── Investigation integration ───────────────────────────────────
+#
+# When staff opens a ticket, run a real, workflow-aware investigation
+# (resolver → MCP evidence lookup → rule engine) and fold its data-driven
+# results onto the ticket so the existing builders render a specific
+# diagnosis, real evidence, and clear missing evidence.
+
+def _has_resolvable_entity(t: ChatHandoffTicket) -> bool:
+    """True when there is something to investigate.
+
+    Transaction workflows can be investigated either from a direct id OR from
+    the complainant identity plus searchable criteria (amount/bank/time) — the
+    investigation resolver then pins down the transaction. This is why real
+    tickets (where the chat never captured a transaction_id) still get a real,
+    specific diagnosis instead of a vague placeholder.
+    """
+    wf = t.selected_workflow or ""
+    ei = t.extracted_info or {}
+    if wf in ("wallet_topup", "train_ticket", "utility_bill"):
+        has_direct_id = not (_is_placeholder_label(ei.get("transaction_id"))
+                             and _is_placeholder_label(ei.get("order_id")))
+        if has_direct_id:
+            return True
+        # identity + at least one searchable criterion
+        if not (t.complainant.user_id or "").strip():
+            return False
+        return any(not _is_placeholder_label(ei.get(k)) for k in (
+            "amount", "bank_name", "bank_reference",
+            "approximate_time_text", "approximate_date_text",
+        ))
+    if wf == "fraud_account_lock":
+        return bool((t.complainant.user_id or "").strip()
+                    or not _is_placeholder_label(ei.get("user_id")))
+    if wf == "merchant_settlement_delay":
+        return bool((t.complainant.merchant_id or "").strip()
+                    or not _is_placeholder_label(ei.get("merchant_id")))
+    return False
+
+
+def _apply_investigation_to_ticket(t: ChatHandoffTicket, inv: Any) -> None:
+    """Fold a TicketInvestigation onto the ticket (cache + feed builders).
+
+    Only overrides diagnosis/action fields when the investigation actually
+    resolved evidence; when unresolved it still records exactly what is missing.
+    """
+    ev = dict(t.internal_staff_evidence_summary or {})
+    ev["evidence_summary"] = inv.evidence_summary
+    ev["missing_evidence"] = inv.missing_evidence
+    ev["resolved_entity"] = {
+        "type": inv.resolved_entity_type, "id": inv.resolved_entity_id,
+    }
+    if inv.what_was_checked:
+        ev["what_was_checked"] = inv.what_was_checked
+    if inv.confirmed_facts:
+        ev["confirmed_public_facts"] = inv.confirmed_facts
+    if inv.likely_issue:
+        ev["likely_issue_location"] = inv.likely_issue
+    if inv.money_or_issue_location:
+        ev["money_or_issue_location"] = inv.money_or_issue_location
+    if inv.likely_bottleneck:
+        ev["likely_bottleneck"] = inv.likely_bottleneck
+    if inv.why_staff_action_needed:
+        ev["rule_diagnosis"] = inv.why_staff_action_needed
+    t.internal_staff_evidence_summary = ev
+
+    t.diagnosis_confidence = inv.confidence or t.diagnosis_confidence
+
+    if inv.resolved:
+        if inv.rule_action:
+            t.recommended_action = inv.rule_action
+        t.approval_required = inv.approval_required
+        if inv.risk_level and inv.risk_level != "unknown":
+            t.risk_level = inv.risk_level
+        # Enrich the staff-facing diagnosis (does not touch customer-safe chat copy)
+        diag = dict(t.public_safe_diagnosis or {})
+        if inv.confirmed_facts:
+            diag["confirmed_public_facts"] = inv.confirmed_facts
+        if inv.what_was_checked:
+            diag["what_was_checked"] = inv.what_was_checked
+        if inv.likely_issue:
+            diag["likely_issue_location"] = inv.likely_issue
+        t.public_safe_diagnosis = diag
+    else:
+        # Evidence insufficient → primary action must NOT be "Phê duyệt xử lý".
+        # Route to manual review; staff can still "Yêu cầu bổ sung".
+        t.recommended_action = "manual_review"
+        t.approval_required = False
+        diag = dict(t.public_safe_diagnosis or {})
+        if inv.likely_issue:
+            diag["likely_issue_location"] = inv.likely_issue
+        t.public_safe_diagnosis = diag
+
+
+def _maybe_investigate(t: ChatHandoffTicket) -> None:
+    """Run the investigation when the ticket has something to investigate."""
+    if not _has_resolvable_entity(t):
+        return
+    try:
+        from fintech_agent.api.ticket_investigation import (
+            investigate_customer_chat_ticket,
+        )
+        inv = investigate_customer_chat_ticket(t)
+        _apply_investigation_to_ticket(t, inv)
+    except Exception:  # noqa: BLE001 — never fail the detail endpoint
+        logger.exception("[ChatTicket] Investigation failed for %s", t.ticket_id)
 
 
 # ─── Row / Detail serializers ────────────────────────────────────
@@ -1130,6 +1340,10 @@ def _to_detail(t: ChatHandoffTicket) -> ChatTicketDetail:
         handoff_reason=t.handoff_reason,
         created_at=t.created_at,
         updated_at=t.updated_at,
+        # Investigation result (explicit, staff-facing)
+        resolved_entity=dict((t.internal_staff_evidence_summary or {}).get("resolved_entity", {})),
+        money_or_issue_location=str((t.internal_staff_evidence_summary or {}).get("money_or_issue_location", "")),
+        missing_evidence=list((t.internal_staff_evidence_summary or {}).get("missing_evidence", []) or []),
         # Structured fields for action-oriented staff UX
         ticket_header=_build_ticket_header(t),
         customer_problem_structured=_build_customer_problem(t),
@@ -1138,6 +1352,10 @@ def _to_detail(t: ChatHandoffTicket) -> ChatTicketDetail:
         staff_action=_build_staff_action(t),
         conversation_timeline=timeline_limited,
         audit_entries=[AuditLogEntry(**e) for e in t.audit_log],
+        # Claims vs Evidence
+        customer_claims_data=t.customer_claims_data,
+        verified_evidence_data=t.verified_evidence_data,
+        contradictions_data=t.contradictions_data,
     )
 
 
@@ -1209,6 +1427,8 @@ async def get_chat_ticket(ticket_id: str) -> ChatTicketDetail:
     t = get_ticket_store().get(ticket_id)
     if t is None:
         raise HTTPException(status_code=404, detail="Ticket not found")
+    # Run (or refresh) the back-office investigation when staff opens the ticket.
+    _maybe_investigate(t)
     detail = _to_detail(t)
     logger.debug(
         "[ChatTicket] ticket=%s extracted_keys=%s evidence_present=%s "

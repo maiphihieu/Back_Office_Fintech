@@ -139,7 +139,7 @@ class TestWalletTopupSafetyInvariants:
         # Reset the global draft store to avoid idempotency collision
         reset_default_store()
 
-        client = FintechMCPClient(mode="in_process")
+        client = FintechMCPClient()
 
         # Read transaction before
         before = client.call_tool_sync("get_transaction", {"transaction_id": "TXN_TOPUP_001"})
@@ -159,3 +159,5 @@ class TestWalletTopupSafetyInvariants:
         # Read transaction after — must still be pending
         after = client.call_tool_sync("get_transaction", {"transaction_id": "TXN_TOPUP_001"})
         assert after["status"] == "pending"
+
+        client.close()

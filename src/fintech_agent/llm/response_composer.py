@@ -67,6 +67,9 @@ Given:
 - A public-safe diagnosis (what was checked, confirmed facts, likely issue
   location, customer-safe cause, next step, customer action)
 - Resolution status
+- Customer claims (what the customer SAID — NOT verified)
+- Verified evidence (what the system CONFIRMED from database/tools)
+- Contradictions (mismatches between claims and evidence)
 
 Write a response that:
 1. Acknowledges what the customer said
@@ -74,11 +77,25 @@ Write a response that:
 3. States what happens next
 4. If info is needed: asks for it clearly
 5. Matches the customer's emotional tone (calm/reassuring/urgent_but_safe)
+6. If contradictions exist: politely note the discrepancy WITHOUT accusing.
+   Example: "Theo hệ thống, giao dịch ghi nhận số tiền 300.000đ (bạn đã đề cập 500.000đ). \
+   Bạn vui lòng xác nhận lại số tiền chính xác?"
 
 HARD RULES:
 - Do NOT make business decisions.
 - Do NOT promise refund, unlock, payout, wallet credit, or an exact ETA unless
   it is explicitly present in the provided diagnosis.
+- Do NOT say "đã xác nhận" or "đã kiểm tra" for customer-claimed info that has
+  NOT been verified by the system. Only use confirmed language for fields in
+  the verified_evidence section.
+- Distinguish the bank/payment side from the customer's wallet/account credit.
+  Only state that the customer's wallet/account has RECEIVED the money, or that
+  the transaction SUCCEEDED/COMPLETED, if that exact fact is present in
+  confirmed_public_facts. If the bank side is confirmed but wallet credit is not
+  a confirmed fact (i.e. still pending/being processed), you MUST say the money
+  has NOT yet been credited to the customer's wallet and is being processed —
+  never imply otherwise. Confirming a credit that has not happened is a serious
+  error.
 - Stay strictly within the active workflow's topic. Do NOT borrow wording from
   other workflows. In particular, for a non-wallet workflow (e.g. train_ticket,
   utility_bill, fraud_account_lock, merchant_settlement_delay) NEVER use wallet
@@ -106,6 +123,8 @@ def _compose_with_llm(
     active_case_context: dict | None,
     public_safe_evidence: dict,
     resolution_status: str,
+    contradictions: list | None = None,
+    recheck_context: dict | None = None,
 ) -> ComposedResponse | None:
     """Use LLM to compose a customer response.
 
@@ -128,7 +147,7 @@ def _compose_with_llm(
         "confidence": public_safe_evidence.get("confidence", "low"),
     }
 
-    user_prompt = json.dumps({
+    user_prompt_data = {
         "customer_message": customer_message,
         "message_type": analysis.message_type,
         "customer_emotion": analysis.customer_emotion,
@@ -137,7 +156,24 @@ def _compose_with_llm(
         "resolution_status": resolution_status,
         "diagnosis": diagnosis_for_llm,
         "active_case_workflow": (active_case_context or {}).get("selected_workflow", ""),
-    }, ensure_ascii=False)
+    }
+
+    # Include contradictions if any
+    if contradictions:
+        user_prompt_data["contradictions"] = [
+            {
+                "field": c.get("field", "") if isinstance(c, dict) else getattr(c, "field", ""),
+                "customer_claim": c.get("customer_claim") if isinstance(c, dict) else getattr(c, "customer_claim", None),
+                "verified_value": c.get("verified_value") if isinstance(c, dict) else getattr(c, "verified_value", None),
+            }
+            for c in contradictions
+        ]
+
+    # Include recheck context if this is a status recheck
+    if recheck_context:
+        user_prompt_data["recheck_context"] = recheck_context
+
+    user_prompt = json.dumps(user_prompt_data, ensure_ascii=False)
 
     try:
         from openai import OpenAI
@@ -188,6 +224,8 @@ def _compose_from_diagnosis(
     safety_reminder: str,
     wf_policy: dict,
     policy: dict | None,
+    contradictions: list | None = None,
+    recheck_context: dict | None = None,
 ) -> ComposedResponse:
     """Build response from structured diagnosis fields.
 
@@ -198,6 +236,8 @@ def _compose_from_diagnosis(
       - next_step
       - customer_action_needed
     All fields come from the evidence mapper, never hard-coded here.
+
+    If contradictions exist, prepends a polite correction before the diagnosis.
     """
     cause = public_safe_evidence.get("customer_safe_cause", "")
     facts = public_safe_evidence.get("confirmed_public_facts", [])
@@ -207,6 +247,41 @@ def _compose_from_diagnosis(
     confidence = public_safe_evidence.get("confidence", "low")
 
     parts: list[str] = []
+
+    # 0a. Recheck notice — tell the customer whether the status changed
+    if recheck_context and recheck_context.get("is_recheck"):
+        if recheck_context.get("status_changed"):
+            parts.append(
+                "Hệ thống vừa kiểm tra lại. Trạng thái đã được cập nhật."
+            )
+        else:
+            parts.append(
+                "Hệ thống vừa kiểm tra lại — trạng thái hiện tại vẫn giữ nguyên."
+            )
+
+    # 0b. Contradiction notice (polite, non-accusatory)
+    if contradictions:
+        for c in contradictions:
+            field = c.get("field", "") if isinstance(c, dict) else getattr(c, "field", "")
+            claim = c.get("customer_claim") if isinstance(c, dict) else getattr(c, "customer_claim", None)
+            verified = c.get("verified_value") if isinstance(c, dict) else getattr(c, "verified_value", None)
+            if field == "amount" and claim is not None and verified is not None:
+                try:
+                    claim_fmt = f"{int(claim):,}".replace(",", ".")
+                    verified_fmt = f"{int(verified):,}".replace(",", ".")
+                    parts.append(
+                        f"Theo hệ thống, giao dịch ghi nhận số tiền {verified_fmt}đ "
+                        f"(bạn đã đề cập {claim_fmt}đ). "
+                        f"Bạn vui lòng xác nhận lại số tiền chính xác."
+                    )
+                except (ValueError, TypeError):
+                    pass
+            elif field == "bank_name" and claim and verified:
+                parts.append(
+                    f"Theo hệ thống, ngân hàng ghi nhận là {verified} "
+                    f"(bạn đã đề cập {claim}). "
+                    f"Bạn vui lòng xác nhận lại thông tin."
+                )
 
     # 1. Acknowledge what we found
     if cause:
@@ -271,7 +346,7 @@ def _compose_from_diagnosis(
 
     needs_info = resolution_status in (
         "need_more_info", "multiple_candidates", "no_match",
-    )
+    ) or bool(contradictions)
 
     tone = "reassuring" if resolution_status == "resolved" else "calm"
 
@@ -291,6 +366,8 @@ def _compose_deterministic(
     active_case_context: dict | None,
     public_safe_evidence: dict,
     resolution_status: str,
+    contradictions: list | None = None,
+    recheck_context: dict | None = None,
 ) -> ComposedResponse:
     """Build response from policy templates when LLM is unavailable."""
     policy = load_response_policy()
@@ -311,6 +388,15 @@ def _compose_deterministic(
             safety_reminder_needed=True,
         )
 
+    # Handle correction acknowledgment
+    if analysis.message_type == "correct_previous_info":
+        return _compose_from_diagnosis(
+            public_safe_evidence, resolution_status,
+            safety_reminder, wf_policy, policy,
+            contradictions=contradictions,
+            recheck_context=recheck_context,
+        )
+
     if analysis.message_type == "ask_what_to_do":
         # If we have a specific diagnosis (e.g. bank-account verification needed),
         # answer from it rather than the generic guidance template.
@@ -318,6 +404,8 @@ def _compose_deterministic(
             return _compose_from_diagnosis(
                 public_safe_evidence, resolution_status,
                 safety_reminder, wf_policy, policy,
+                contradictions=contradictions,
+                recheck_context=recheck_context,
             )
         guidance = wf_policy.get("guidance_template") or policy.get("generic_guidance_template", "")
         msg = f"{guidance}\n\n{safety_reminder}".strip()
@@ -343,6 +431,8 @@ def _compose_deterministic(
         return _compose_from_diagnosis(
             public_safe_evidence, resolution_status,
             safety_reminder, wf_policy, policy,
+            contradictions=contradictions,
+            recheck_context=recheck_context,
         )
 
     # new_complaint or unknown: prefer a diagnosis-driven reply when we have one
@@ -352,6 +442,8 @@ def _compose_deterministic(
         return _compose_from_diagnosis(
             public_safe_evidence, resolution_status,
             safety_reminder, wf_policy, policy,
+            contradictions=contradictions,
+            recheck_context=recheck_context,
         )
 
     # otherwise → use generic fallback
@@ -377,6 +469,8 @@ def compose_customer_response(
     active_case_context: dict | None = None,
     public_safe_evidence: dict | None = None,
     resolution_status: str = "",
+    contradictions: list | None = None,
+    recheck_context: dict | None = None,
 ) -> ComposedResponse:
     """Compose a customer-facing response.
 
@@ -388,6 +482,8 @@ def compose_customer_response(
         active_case_context: Active case state dict.
         public_safe_evidence: Output from to_public_safe_evidence.
         resolution_status: resolved | multiple_candidates | no_match | etc.
+        contradictions: List of Contradiction objects (claim vs evidence mismatches).
+        recheck_context: Dict with is_recheck, status_changed, old_status, new_status.
 
     Returns:
         ComposedResponse with public_message and metadata.
@@ -400,6 +496,8 @@ def compose_customer_response(
         customer_message, message_analysis,
         active_case_context, public_safe_evidence,
         resolution_status,
+        contradictions=contradictions,
+        recheck_context=recheck_context,
     )
 
     if llm_result is not None and llm_result.public_message:
@@ -414,6 +512,8 @@ def compose_customer_response(
         customer_message, message_analysis,
         active_case_context, public_safe_evidence,
         resolution_status,
+        contradictions=contradictions,
+        recheck_context=recheck_context,
     )
 
     logger.info(
@@ -423,3 +523,374 @@ def compose_customer_response(
     )
 
     return det_result
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Contextual Missing-Info Question Composer
+#
+# Replaces the old hardcoded _SAFE_QUESTION_MAP approach.
+# Questions are now generated based on the complaint context:
+#   - What the customer already provided
+#   - What's still needed
+#   - The active workflow
+#   - The diagnosis so far
+# ═══════════════════════════════════════════════════════════════════
+
+# ─── Security Constants ─────────────────────────────────────────
+
+_BLOCKED_QUESTION_FIELDS = frozenset({
+    "password", "otp", "pin", "card_number", "private_key",
+    "secret", "token", "api_key", "cvv", "cvc",
+})
+
+_WALLET_USER_KNOWN_FIELDS = frozenset({
+    "user_id", "wallet_id", "phone", "email", "display_name",
+})
+
+_MERCHANT_KNOWN_FIELDS = frozenset({
+    "merchant_id", "tax_code", "phone", "email", "display_name",
+    "merchant_name",
+})
+
+# Safety keywords that must NEVER appear in generated questions
+_BLOCKED_QUESTION_KEYWORDS = ("pin", "otp", "mật khẩu", "password", "số thẻ đầy đủ", "cvv")
+
+# Field → human-readable Vietnamese label (for deterministic fallback)
+_FIELD_LABELS: dict[str, str] = {
+    "transaction_id": "mã giao dịch",
+    "order_id": "mã đơn hàng",
+    "bill_code": "mã hóa đơn",
+    "customer_code": "mã khách hàng",
+    "amount": "số tiền giao dịch",
+    "bank_name": "ngân hàng đã dùng",
+    "bank_reference": "mã tham chiếu ngân hàng",
+    "transaction_time": "thời gian giao dịch gần đúng",
+    "approximate_time_text": "thời gian giao dịch gần đúng",
+    "approximate_date_text": "ngày giao dịch gần đúng",
+    "service_type": "loại dịch vụ",
+    "user_id": "tên tài khoản hoặc số điện thoại đăng ký",
+    "phone": "số điện thoại đã đăng ký",
+    "email": "email đã đăng ký",
+    "merchant_id": "mã đối tác (Merchant ID)",
+    "merchant_name": "tên đối tác/merchant",
+    "tax_code": "mã số thuế",
+    "payout_id": "mã thanh toán (Payout ID)",
+    "batch_id": "mã lô thanh toán (Batch ID)",
+    "provider_name": "nhà cung cấp dịch vụ",
+    "settlement_date": "ngày settlement",
+}
+
+
+# ─── LLM Question Composer ──────────────────────────────────────
+
+_QUESTION_SYSTEM_PROMPT = """\
+You are a Vietnamese fintech customer support assistant. Generate follow-up \
+questions to collect missing information from the customer.
+
+Given:
+- customer_message: what the customer wrote
+- already_provided: information the customer has already given (DO NOT re-ask)
+- still_needed: fields that are still missing
+- workflow: the type of complaint (wallet_topup, train_ticket, utility_bill, \
+  merchant_settlement_delay, fraud_account_lock)
+- diagnosis_summary: what has been checked so far
+
+Generate 1-3 concise, polite follow-up questions in Vietnamese that:
+1. Acknowledge what the customer already provided — DO NOT re-ask for it
+2. Ask for the most important missing information FIRST
+3. Are specific to the customer's situation and workflow
+4. Use natural, conversational Vietnamese
+5. NEVER ask for: PIN, OTP, mật khẩu, số thẻ đầy đủ, private key, CVV
+
+Return ONLY this JSON (no markdown):
+{
+  "questions": ["câu hỏi 1", "câu hỏi 2"]
+}\
+"""
+
+
+def _filter_safe_fields(
+    missing_fields: list[str],
+    session: dict | None,
+) -> list[str]:
+    """Remove blocked and already-known fields. Security invariant."""
+    known_fields: frozenset[str] = frozenset()
+    if session is not None:
+        subject_type = session.get("subject_type", "")
+        if subject_type == "wallet_user":
+            known_fields = _WALLET_USER_KNOWN_FIELDS
+        elif subject_type == "merchant":
+            known_fields = _MERCHANT_KNOWN_FIELDS
+
+    safe: list[str] = []
+    for field in missing_fields:
+        lower = field.lower()
+        if any(blocked in lower for blocked in _BLOCKED_QUESTION_FIELDS):
+            continue
+        if field in known_fields:
+            continue
+        safe.append(field)
+    return safe
+
+
+def _compose_questions_llm(
+    missing_fields: list[str],
+    extracted_info: dict,
+    workflow: str,
+    diagnosis: dict,
+    customer_message: str,
+) -> list[str] | None:
+    """Use LLM to generate contextual questions. Returns None if unavailable."""
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    if not api_key:
+        return None
+
+    model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+
+    # Only include non-empty extracted values
+    provided_summary = {k: v for k, v in extracted_info.items() if v}
+
+    user_prompt = json.dumps({
+        "customer_message": customer_message,
+        "already_provided": provided_summary,
+        "still_needed": missing_fields,
+        "workflow": workflow,
+        "diagnosis_summary": {
+            "confirmed_facts": diagnosis.get("confirmed_public_facts", []),
+            "issue_location": diagnosis.get("likely_issue_location", ""),
+            "cause": diagnosis.get("customer_safe_cause", ""),
+        },
+    }, ensure_ascii=False)
+
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key, timeout=8.0)
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _QUESTION_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.3,
+            max_tokens=300,
+            response_format={"type": "json_object"},
+        )
+
+        raw = response.choices[0].message.content
+        if not raw:
+            return None
+
+        parsed = json.loads(raw)
+        questions = parsed.get("questions", [])
+
+        if isinstance(questions, list) and questions:
+            # Safety post-filter: reject any question mentioning blocked terms
+            safe_questions = [
+                q for q in questions
+                if isinstance(q, str) and q.strip()
+                and not any(kw in q.lower() for kw in _BLOCKED_QUESTION_KEYWORDS)
+            ]
+            return safe_questions[:3] if safe_questions else None
+
+        return None
+
+    except Exception as exc:
+        logger.warning(
+            "[QuestionComposer] LLM failed (%s): %s — using fallback",
+            type(exc).__name__, exc,
+        )
+        return None
+
+
+def _compose_questions_deterministic(
+    missing_fields: list[str],
+    extracted_info: dict,
+    workflow: str,
+    diagnosis: dict,
+) -> list[str]:
+    """Build context-aware questions without LLM.
+
+    Improves over the old _SAFE_QUESTION_MAP by:
+    1. Acknowledging what was already provided
+    2. Listing remaining needs in a single contextual sentence
+    3. Using workflow-aware framing
+    """
+    wf_policy = get_workflow_policy(workflow) if workflow and workflow != "unknown" else {}
+
+    # Build readable labels for missing fields
+    readable_missing: list[str] = []
+    for field in missing_fields:
+        label = _FIELD_LABELS.get(field)
+        if label:
+            readable_missing.append(label)
+        elif field not in ("missing_fields",):
+            # Fallback: use the field name itself, cleaned up
+            readable_missing.append(field.replace("_", " "))
+
+    if not readable_missing:
+        return []
+
+    # Build acknowledgment of what was provided
+    provided_parts: list[str] = []
+    for key, label in (
+        ("amount", "số tiền"),
+        ("bank_name", "ngân hàng"),
+        ("transaction_id", "mã giao dịch"),
+        ("order_id", "mã đơn hàng"),
+    ):
+        val = extracted_info.get(key)
+        if val:
+            provided_parts.append(f"{label} {val}")
+    time_val = extracted_info.get("approximate_time_text") or extracted_info.get(
+        "approximate_date_text",
+    )
+    if time_val:
+        provided_parts.append(f"thời gian {time_val}")
+
+    # Compose contextual question
+    if provided_parts:
+        ack = f"Bạn đã cung cấp {', '.join(provided_parts)}. "
+    else:
+        ack = ""
+
+    needed_str = ", ".join(readable_missing)
+
+    # Use workflow-specific safety reminder if available
+    safety = wf_policy.get("safety_reminder", "")
+    safety_suffix = f" {safety}" if safety else ""
+
+    question = (
+        f"{ack}Để xử lý nhanh hơn, bạn có thể cho biết thêm "
+        f"{needed_str} không?{safety_suffix}"
+    )
+
+    return [question]
+
+
+def compose_contextual_questions(
+    missing_fields: list[str],
+    extracted_info: dict,
+    workflow: str,
+    public_safe_diagnosis: dict,
+    customer_message: str,
+    session: dict | None = None,
+) -> list[str]:
+    """Generate context-aware missing info questions.
+
+    LLM-first: generates specific questions based on what the customer
+    said, what they've already provided, and what's still needed.
+
+    Deterministic fallback: acknowledges provided info and asks for
+    remaining fields in a contextual way.
+
+    Security invariant: NEVER asks for PIN/OTP/password/card number.
+    Already-known fields from session are excluded.
+
+    Args:
+        missing_fields: Field names still needed.
+        extracted_info: What the customer has already provided.
+        workflow: Active workflow name.
+        public_safe_diagnosis: Output from evidence_mapper.
+        customer_message: The customer's raw message text.
+        session: Authenticated session (for known-field filtering).
+
+    Returns:
+        List of contextual, safe follow-up questions (max 3).
+    """
+    # 1. Security filter — always applied regardless of LLM/fallback
+    safe_fields = _filter_safe_fields(missing_fields, session)
+    if not safe_fields:
+        return []
+
+    # 2. Try LLM
+    llm_result = _compose_questions_llm(
+        safe_fields,
+        extracted_info or {},
+        workflow or "",
+        public_safe_diagnosis or {},
+        customer_message,
+    )
+    if llm_result:
+        logger.info(
+            "[QuestionComposer] LLM generated %d contextual questions",
+            len(llm_result),
+        )
+        return llm_result
+
+    # 3. Deterministic fallback (still context-aware)
+    fallback = _compose_questions_deterministic(
+        safe_fields,
+        extracted_info or {},
+        workflow or "",
+        public_safe_diagnosis or {},
+    )
+    logger.info(
+        "[QuestionComposer] Deterministic fallback: %d questions",
+        len(fallback),
+    )
+    return fallback
+
+
+# ─── Acknowledgement Response Composer ─────────────────────────
+
+def compose_acknowledgement_response(
+    resolution_status: str = "",
+    workflow: str = "",
+) -> str:
+    """Compose a short, case-state-aware acknowledgement response.
+
+    Called when the customer sends "được rồi", "ok", "cảm ơn" etc.
+    while an active case exists.
+
+    The response varies by resolution_status:
+      - resolved: thank + can message again
+      - no_match: thank + can send receipt/reference later
+      - unresolved/other: thank + issue is recorded
+
+    Returns a natural Vietnamese text — NEVER hardcoded to one exact phrase.
+    """
+    # Get workflow display noun from registry
+    noun = "giao dịch"
+    try:
+        from fintech_agent.workflows.workflow_registry import get_registry
+        registry = get_registry()
+        noun = registry.get_display_noun(workflow) or "giao dịch"
+    except Exception:
+        pass
+
+    # Load safety reminder from policy
+    policy = load_response_policy()
+    safety_hint = policy.get("global_safety_reminder", "")
+    safety_short = "Vui lòng không gửi PIN, OTP hoặc mật khẩu."
+    if safety_hint:
+        # Use a short form if the full one is too long
+        safety_short = safety_hint if len(safety_hint) < 80 else safety_short
+
+    status = (resolution_status or "").lower()
+
+    if status in ("resolved", "completed", "success"):
+        # Case resolved in chat
+        return (
+            f"Cảm ơn bạn đã xác nhận. Nội dung trao đổi về {noun} đã được ghi nhận. "
+            f"Nếu bạn cần hỗ trợ thêm, bạn có thể gửi tiếp trong khung chat này. "
+            f"{safety_short}"
+        )
+
+    if status in ("no_match",):
+        # No matching data found — remind they can send evidence later
+        return (
+            f"Cảm ơn bạn. Mình đã ghi nhận nội dung trao đổi. "
+            f"Nếu bạn có thêm mã tham chiếu ngân hàng hoặc biên lai, "
+            f"bạn có thể gửi tiếp trong khung chat này để mình kiểm tra lại. "
+            f"{safety_short}"
+        )
+
+    # Unresolved / processing / other
+    return (
+        f"Cảm ơn bạn. Mình đã ghi nhận nội dung trao đổi. "
+        f"Nếu bạn cần kiểm tra thêm hoặc có thêm thông tin, "
+        f"bạn có thể gửi tiếp trong khung chat này. "
+        f"{safety_short}"
+    )
+

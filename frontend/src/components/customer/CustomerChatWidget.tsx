@@ -56,7 +56,26 @@ const STORAGE_KEYS = {
   lastActive: 'customer_chat_last_active_at',
   caseId: 'customer_chat_case_id',
   sessionId: 'customer_chat_session_id',
+  serverInstance: 'customer_chat_server_instance',
 } as const;
+
+/**
+ * Reset the chat when the backend has restarted.
+ *
+ * The backend reports a server_instance_id that changes on every restart. If it
+ * differs from the one we stored, the server no longer has our chat context, so
+ * we clear the saved conversation and start fresh. Returns true if it reset.
+ */
+function resetChatOnServerRestart(serverInstanceId?: string): boolean {
+  if (!serverInstanceId) return false;
+  const stored = localStorage.getItem(STORAGE_KEYS.serverInstance);
+  localStorage.setItem(STORAGE_KEYS.serverInstance, serverInstanceId);
+  if (stored && stored !== serverInstanceId) {
+    clearChatState();
+    return true;
+  }
+  return false;
+}
 
 const WELCOME_LOGGED_IN: ChatMessage = {
   id: 'welcome',
@@ -188,6 +207,16 @@ export default function CustomerChatWidget() {
       authApi.me(sessionId).then((res) => {
         if (res.is_authenticated) {
           setSession(storedSession);
+
+          // If the backend restarted, it no longer has our chat context →
+          // start a fresh conversation instead of restoring a stale one.
+          if (resetChatOnServerRestart(res.server_instance_id)) {
+            setMessages([WELCOME_LOGGED_IN]);
+            setActiveCaseId('');
+            touchLastActive();
+            setAuthChecked(true);
+            return;
+          }
 
           // Try to restore persisted chat
           const cached = loadChatState(sessionId);
