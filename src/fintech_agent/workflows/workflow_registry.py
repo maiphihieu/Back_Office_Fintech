@@ -67,6 +67,16 @@ class WorkflowSpec:
     # Staff handoff policy
     staff_handoff_policy: dict[str, Any] = field(default_factory=dict)
 
+    # Issue verification rules — what constitutes "issue exists" for this workflow.
+    # Generic contract: the verifier checks these rules against verified evidence.
+    # Example: {"issue_when": {"status": ["pending", "failed", "error"]}}
+    issue_verification_rules: dict[str, Any] = field(default_factory=dict)
+
+    # Safe response policy — what the response composer is allowed to say.
+    # Workflow-specific constraints on response content and phrasing.
+    # Example: {"may_mention": ["bank_status", "wallet_status"], "never_promise": ["refund"]}
+    safe_response_policy: dict[str, Any] = field(default_factory=dict)
+
     # ── Callables (lazy-loaded) ──
     # resolver(session, extracted, workflow_hint, message_type) → ResolutionResult
     resolver: Callable[..., Any] | None = None
@@ -153,6 +163,22 @@ class WorkflowRegistry:
                 return spec.workflow_id
         return None
 
+    def get_issue_rules(self, workflow_id: str) -> dict:
+        """Get issue verification rules for a workflow.
+
+        Returns empty dict if workflow is not registered.
+        """
+        spec = self._specs.get(workflow_id)
+        return spec.issue_verification_rules if spec else {}
+
+    def get_response_policy(self, workflow_id: str) -> dict:
+        """Get safe response policy for a workflow.
+
+        Returns empty dict if workflow is not registered.
+        """
+        spec = self._specs.get(workflow_id)
+        return spec.safe_response_policy if spec else {}
+
 
 # ─── Singleton ─────────────────────────────────────────────────
 
@@ -211,6 +237,16 @@ def _register_builtin_workflows(reg: WorkflowRegistry) -> None:
             "requires_staff": ["contradiction", "unresolved_financial"],
             "skip_staff": ["faq", "off_topic", "resolved"],
         },
+        issue_verification_rules={
+            "issue_when": {"status": ["pending", "failed", "error", "processing"]},
+            "no_issue_when": {"status": ["completed", "success", "confirmed"]},
+        },
+        safe_response_policy={
+            "may_mention": ["bank_status", "wallet_status", "reconciliation_status"],
+            "never_promise": ["refund", "wallet_credit", "exact_eta"],
+            "claim_label": "bạn cung cấp",
+            "evidence_label": "theo kiểm tra hệ thống",
+        },
     ))
 
     # ── train_ticket ──
@@ -235,6 +271,16 @@ def _register_builtin_workflows(reg: WorkflowRegistry) -> None:
         staff_handoff_policy={
             "requires_staff": ["contradiction", "unresolved_financial"],
             "skip_staff": ["faq", "off_topic", "resolved"],
+        },
+        issue_verification_rules={
+            "issue_when": {"status": ["pending", "failed", "error"]},
+            "no_issue_when": {"status": ["completed", "success"]},
+        },
+        safe_response_policy={
+            "may_mention": ["ticket_status", "provider_status"],
+            "never_promise": ["refund", "ticket_reissue", "exact_eta"],
+            "claim_label": "bạn cung cấp",
+            "evidence_label": "theo kiểm tra hệ thống",
         },
     ))
 
@@ -261,6 +307,16 @@ def _register_builtin_workflows(reg: WorkflowRegistry) -> None:
             "requires_staff": ["contradiction", "unresolved_financial"],
             "skip_staff": ["faq", "off_topic", "resolved"],
         },
+        issue_verification_rules={
+            "issue_when": {"status": ["pending", "failed", "error"]},
+            "no_issue_when": {"status": ["completed", "success"]},
+        },
+        safe_response_policy={
+            "may_mention": ["bill_status", "provider_status"],
+            "never_promise": ["refund", "exact_eta"],
+            "claim_label": "bạn cung cấp",
+            "evidence_label": "theo kiểm tra hệ thống",
+        },
     ))
 
     # ── fraud_account_lock ──
@@ -282,6 +338,16 @@ def _register_builtin_workflows(reg: WorkflowRegistry) -> None:
         staff_handoff_policy={
             "requires_staff": ["account_locked", "under_review"],
             "skip_staff": ["account_active", "faq"],
+        },
+        issue_verification_rules={
+            "issue_when": {"account_status": ["locked", "suspended", "under_review"]},
+            "no_issue_when": {"account_status": ["active"]},
+        },
+        safe_response_policy={
+            "may_mention": ["account_status"],
+            "never_promise": ["unlock", "exact_eta"],
+            "claim_label": "bạn cung cấp",
+            "evidence_label": "theo kiểm tra hệ thống",
         },
     ))
 
@@ -307,6 +373,16 @@ def _register_builtin_workflows(reg: WorkflowRegistry) -> None:
         staff_handoff_policy={
             "requires_staff": ["payout_failed", "bank_account_invalid"],
             "skip_staff": ["faq", "off_topic", "completed"],
+        },
+        issue_verification_rules={
+            "issue_when": {"settlement_status": ["pending", "delayed", "failed"]},
+            "no_issue_when": {"settlement_status": ["completed", "paid"]},
+        },
+        safe_response_policy={
+            "may_mention": ["payment_status", "settlement_status", "bank_account_status"],
+            "never_promise": ["payout", "manual_payout", "exact_eta"],
+            "claim_label": "bạn cung cấp",
+            "evidence_label": "theo kiểm tra hệ thống",
         },
     ))
 

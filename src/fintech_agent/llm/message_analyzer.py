@@ -860,11 +860,24 @@ def analyze_customer_message(
     llm_result = _analyze_with_llm(message, active_case_context, session_context)
 
     if llm_result is not None and llm_result.confidence >= 0.65:
+        # The LLM is reliable for message_type but sometimes punts on the
+        # workflow (returns "unknown"). When that happens, backfill the
+        # workflow from the deterministic keyword classifier so a clearly
+        # on-topic complaint is never stranded without a workflow to verify.
+        if (not llm_result.workflow_hint) or llm_result.workflow_hint == "unknown":
+            fb = _fallback_analyze(message, active_case_context, session_context)
+            if fb.workflow_hint and fb.workflow_hint != "unknown":
+                logger.info(
+                    "[MessageAnalyzer] LLM workflow unknown — backfilled '%s' "
+                    "from deterministic classifier",
+                    fb.workflow_hint,
+                )
+                llm_result.workflow_hint = fb.workflow_hint
         logger.info(
-            "[MessageAnalyzer] LLM: type=%s, conf=%.2f, emotion=%s, "
+            "[MessageAnalyzer] LLM: type=%s, conf=%.2f, workflow=%s, emotion=%s, "
             "amount=%s, bank=%s",
             llm_result.message_type, llm_result.confidence,
-            llm_result.customer_emotion,
+            llm_result.workflow_hint, llm_result.customer_emotion,
             llm_result.extracted.amount,
             llm_result.extracted.bank_name,
         )

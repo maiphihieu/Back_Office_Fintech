@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -67,19 +68,29 @@ Given:
 - A public-safe diagnosis (what was checked, confirmed facts, likely issue
   location, customer-safe cause, next step, customer action)
 - Resolution status
-- Customer claims (what the customer SAID — NOT verified)
-- Verified evidence (what the system CONFIRMED from database/tools)
+- customer_claims: what the customer SAID — NOT verified. Treat as unverified input.
+- verified_evidence: what the system CONFIRMED from database/tools. Only this is factual.
 - Contradictions (mismatches between claims and evidence)
 
+SOURCE LABELING (MANDATORY):
+- When referring to information from customer_claims, prefix with "bạn cung cấp" \
+  (e.g., "bạn cung cấp số tiền 500.000đ").
+- When referring to information from verified_evidence, prefix with \
+  "theo kiểm tra hệ thống" (e.g., "theo kiểm tra hệ thống, giao dịch ghi nhận 500.000đ").
+- If the customer's claimed value matches the verified value exactly, you may \
+  omit the claim echo and only state the verified fact with the "theo kiểm tra \
+  hệ thống" prefix.
+- NEVER present customer-provided data as if the system confirmed it.
+
 Write a response that:
-1. Acknowledges what the customer said
-2. Reflects the diagnosis (confirmed facts, likely issue location, cause)
+1. Acknowledges what the customer said (label as "bạn cung cấp")
+2. Reflects the diagnosis using verified_evidence (label as "theo kiểm tra hệ thống")
 3. States what happens next
 4. If info is needed: asks for it clearly
 5. Matches the customer's emotional tone (calm/reassuring/urgent_but_safe)
 6. If contradictions exist: politely note the discrepancy WITHOUT accusing.
-   Example: "Theo hệ thống, giao dịch ghi nhận số tiền 300.000đ (bạn đã đề cập 500.000đ). \
-   Bạn vui lòng xác nhận lại số tiền chính xác?"
+   Example: "Theo kiểm tra hệ thống, giao dịch ghi nhận số tiền 300.000đ \
+   (bạn cung cấp 500.000đ). Bạn vui lòng xác nhận lại số tiền chính xác?"
 
 HARD RULES:
 - Do NOT make business decisions.
@@ -105,7 +116,7 @@ HARD RULES:
   reconciliation, approval data, risk scores, or fraud flags.
 - Never ask for PIN, OTP, password, or full card number.
 - Do NOT invent SLA, evidence, or facts not in the diagnosis.
-- Keep it concise (3-5 sentences max). Return JSON only.
+- Keep it concise: 2-5 sentences ONLY. Return JSON only.
 
 Return ONLY this JSON:
 {
@@ -125,6 +136,8 @@ def _compose_with_llm(
     resolution_status: str,
     contradictions: list | None = None,
     recheck_context: dict | None = None,
+    customer_claims: dict | None = None,
+    verified_evidence: dict | None = None,
 ) -> ComposedResponse | None:
     """Use LLM to compose a customer response.
 
@@ -157,6 +170,13 @@ def _compose_with_llm(
         "diagnosis": diagnosis_for_llm,
         "active_case_workflow": (active_case_context or {}).get("selected_workflow", ""),
     }
+
+    # Pass customer claims and verified evidence as separate sections
+    # so the LLM can properly label sources in the response.
+    if customer_claims:
+        user_prompt_data["customer_claims"] = customer_claims
+    if verified_evidence:
+        user_prompt_data["verified_evidence"] = verified_evidence
 
     # Include contradictions if any
     if contradictions:
@@ -283,14 +303,14 @@ def _compose_from_diagnosis(
                     f"Bạn vui lòng xác nhận lại thông tin."
                 )
 
-    # 1. Acknowledge what we found
+    # 1. Acknowledge what we found — prefix verified data with source label
     if cause:
-        parts.append(f"Cảm ơn bạn đã cung cấp thông tin. {cause}")
+        parts.append(f"Theo kiểm tra hệ thống, {cause[0].lower()}{cause[1:]}")
     elif what_we_know:
-        parts.append(f"Cảm ơn bạn đã cung cấp thông tin. {what_we_know}")
+        parts.append(f"Theo kiểm tra hệ thống, {what_we_know[0].lower()}{what_we_know[1:]}")
     elif facts:
         fact_str = "; ".join(facts)
-        parts.append(f"Chúng tôi đã kiểm tra và ghi nhận: {fact_str}.")
+        parts.append(f"Theo kiểm tra hệ thống: {fact_str}.")
 
     # 2. Next step
     if next_step and resolution_status == "resolved":
@@ -461,6 +481,55 @@ def _compose_deterministic(
     )
 
 
+# ─── Sentence Limit Enforcement ────────────────────────────────
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
+# Safety reminder keywords — if the last sentence is a safety reminder,
+# we allow the response to exceed max_sentences by 1.
+_SAFETY_KEYWORDS = ("pin", "otp", "mật khẩu", "password", "thẻ", "bảo mật")
+
+
+def _enforce_sentence_limit(
+    text: str,
+    min_sentences: int = 2,
+    max_sentences: int = 5,
+) -> str:
+    """Enforce a 2-5 sentence constraint on the composed response.
+
+    - If under min_sentences: no padding (the response may be intentionally short,
+      e.g. a contradiction notice or safety warning).
+    - If over max_sentences: truncate to max_sentences, BUT allow max_sentences+1
+      when the last sentence contains a safety reminder keyword.
+    """
+    if not text or not text.strip():
+        return text
+
+    sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(text) if s.strip()]
+
+    if len(sentences) <= max_sentences:
+        return text
+
+    # Check if the sentence at max_sentences index (0-based) is a safety reminder
+    last_allowed = sentences[max_sentences] if len(sentences) > max_sentences else ""
+    is_safety = any(kw in last_allowed.lower() for kw in _SAFETY_KEYWORDS)
+
+    # Allow max+1 for safety reminder
+    effective_max = max_sentences + 1 if is_safety else max_sentences
+    trimmed = sentences[:effective_max]
+
+    result = " ".join(trimmed)
+    # Ensure it ends with punctuation
+    if result and result[-1] not in ".!?":
+        result += "."
+
+    logger.debug(
+        "[Composer] Sentence limit: %d → %d sentences (safety_extension=%s)",
+        len(sentences), len(trimmed), is_safety,
+    )
+    return result
+
+
 # ─── Public Entry Point ────────────────────────────────────────
 
 def compose_customer_response(
@@ -471,6 +540,8 @@ def compose_customer_response(
     resolution_status: str = "",
     contradictions: list | None = None,
     recheck_context: dict | None = None,
+    customer_claims: dict | None = None,
+    verified_evidence: dict | None = None,
 ) -> ComposedResponse:
     """Compose a customer-facing response.
 
@@ -484,6 +555,8 @@ def compose_customer_response(
         resolution_status: resolved | multiple_candidates | no_match | etc.
         contradictions: List of Contradiction objects (claim vs evidence mismatches).
         recheck_context: Dict with is_recheck, status_changed, old_status, new_status.
+        customer_claims: Summary dict of customer-provided claims (for source labeling).
+        verified_evidence: Summary dict of system-verified evidence (for source labeling).
 
     Returns:
         ComposedResponse with public_message and metadata.
@@ -498,9 +571,14 @@ def compose_customer_response(
         resolution_status,
         contradictions=contradictions,
         recheck_context=recheck_context,
+        customer_claims=customer_claims,
+        verified_evidence=verified_evidence,
     )
 
     if llm_result is not None and llm_result.public_message:
+        llm_result.public_message = _enforce_sentence_limit(
+            llm_result.public_message,
+        )
         logger.info(
             "[Composer] LLM: tone=%s, needs_info=%s",
             llm_result.tone, llm_result.needs_more_info,
@@ -514,6 +592,10 @@ def compose_customer_response(
         resolution_status,
         contradictions=contradictions,
         recheck_context=recheck_context,
+    )
+
+    det_result.public_message = _enforce_sentence_limit(
+        det_result.public_message,
     )
 
     logger.info(
@@ -893,4 +975,128 @@ def compose_acknowledgement_response(
         f"bạn có thể gửi tiếp trong khung chat này. "
         f"{safety_short}"
     )
+
+
+# ─── Verification-aware response composer ──────────────────────
+
+def compose_from_verification(
+    latest_message: str,
+    router_result: MessageAnalysis,
+    verification: Any,
+    response_policy: dict | None = None,
+) -> ComposedResponse:
+    """Compose a customer response using ONLY the verification result.
+
+    This is the preferred entry point for the generic verification framework.
+    It uses ONLY:
+      - latest_message (what the customer said)
+      - router_result (LLM analysis of intent/workflow)
+      - verification (VerificationResult from verify_account_issue)
+      - response_policy (from YAML config)
+
+    No stale case context. No external diagnosis. No old workflow data.
+
+    Args:
+        latest_message: The customer's latest message text.
+        router_result: MessageAnalysis from LLM message understanding.
+        verification: VerificationResult from verify_account_issue().
+        response_policy: Loaded customer_response_policy dict.
+
+    Returns:
+        ComposedResponse ready for the customer.
+    """
+    # Extract from verification (supports both dataclass and dict)
+    def _get(obj, key, default=None):
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
+
+    issue_exists = _get(verification, "issue_exists", False)
+    issue_status = _get(verification, "issue_status", "no_match")
+    verified_evidence = _get(verification, "verified_evidence", {}) or {}
+    customer_claims_data = _get(verification, "customer_claims", {}) or {}
+    contradictions = _get(verification, "contradictions", []) or []
+    root_cause = _get(verification, "root_cause", {}) or {}
+    missing_evidence = _get(verification, "missing_evidence", []) or []
+    workflow_id = _get(verification, "workflow_id", "")
+    identity_resolved = _get(verification, "identity_resolved", False)
+
+    # Build public-safe evidence dict for the LLM composer
+    public_safe_evidence = {
+        "what_was_checked": _get(verification, "data_checked", []),
+        "confirmed_public_facts": [],
+        "customer_safe_cause": root_cause.get("reason", ""),
+        "likely_issue_location": root_cause.get("issue_location", ""),
+        "next_step": "",
+        "confidence": root_cause.get("confidence", "low"),
+        "workflow": workflow_id,
+    }
+
+    # Build confirmed facts from verified evidence
+    if verified_evidence.get("status"):
+        public_safe_evidence["confirmed_public_facts"].append(
+            f"trạng thái giao dịch: {verified_evidence['status']}"
+        )
+    if verified_evidence.get("bank_status"):
+        public_safe_evidence["confirmed_public_facts"].append(
+            f"trạng thái ngân hàng: {verified_evidence['bank_status']}"
+        )
+
+    # Map existing evidence keys into the diagnosis
+    for key in ("customer_safe_cause", "likely_issue_location", "next_step",
+                "customer_action_needed", "case_status"):
+        val = verified_evidence.get(key)
+        if val:
+            public_safe_evidence[key] = val
+
+    # Map resolution status for the composer
+    if issue_status == "verified_issue_found":
+        resolution_status = "resolved"
+    elif issue_status == "contradiction":
+        resolution_status = "amount_mismatch"
+    elif issue_status == "insufficient_evidence":
+        resolution_status = "need_more_info"
+    elif issue_status == "no_issue_found":
+        resolution_status = "no_match"
+    else:
+        resolution_status = "no_match"
+
+    if not identity_resolved:
+        resolution_status = "invalid_session"
+
+    # Try LLM composition first
+    composed = _compose_with_llm(
+        customer_message=latest_message,
+        analysis=router_result,
+        active_case_context={"selected_workflow": workflow_id},
+        public_safe_evidence=public_safe_evidence,
+        resolution_status=resolution_status,
+        contradictions=contradictions,
+        customer_claims=customer_claims_data,
+        verified_evidence=verified_evidence,
+    )
+
+    if composed:
+        # Enforce sentence limit
+        composed.public_message = _enforce_sentence_limit(
+            composed.public_message, max_sentences=5,
+        )
+        return composed
+
+    # Deterministic fallback
+    fallback = _compose_deterministic(
+        customer_message=latest_message,
+        analysis=router_result,
+        active_case_context={"selected_workflow": workflow_id},
+        public_safe_evidence=public_safe_evidence,
+        resolution_status=resolution_status,
+        contradictions=contradictions,
+    )
+    fallback.public_message = _enforce_sentence_limit(
+        fallback.public_message, max_sentences=5,
+    )
+    if missing_evidence:
+        fallback.needs_more_info = True
+    return fallback
+
 

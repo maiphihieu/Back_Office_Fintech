@@ -26,6 +26,38 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class IdentityTrace:
+    """Debug trace for identity resolution.
+
+    Tracks how session → user_id/wallet_id/merchant_id resolution went.
+    Never exposed to customer; only in debug_trace for staff/testing.
+    """
+    session_id: str = ""
+    phone: str = ""
+    subject_type: str = ""
+    resolved_user_id: str = ""
+    resolved_wallet_id: str = ""
+    resolved_merchant_id: str = ""
+    source_table: str = ""
+    identity_found: bool = False
+
+
+@dataclass
+class AccountDiscoveryResult:
+    """Structured result from generic account-data discovery.
+
+    Returned by discover_account_issues — a reusable pattern across workflows.
+    """
+    account_data_found: bool = False
+    issue_found: bool = False
+    candidate_issues: list[dict] = field(default_factory=list)
+    problematic_records: list[Any] = field(default_factory=list)
+    data_checked: list[str] = field(default_factory=list)
+    reason: str = ""
+    scan_error: bool = False  # True if scan failed (vs found nothing)
+
+
+@dataclass
 class ResolutionResult:
     """Generic resolution result."""
     resolution_status: str = "need_more_info"
@@ -53,6 +85,9 @@ class ResolutionResult:
     # the verified fields above.
     claimed_amount: int | None = None
     no_exact_claim_match: bool = False
+    # ── Tracing (debug only, never exposed to customer) ──
+    identity_trace: dict | None = None
+    discovery_result: dict | None = None
 
 
 # ─── No-match customer messages (policy templates, safe + honest) ──
@@ -238,6 +273,118 @@ def _search_user_transactions(
     return [txn for _, txn in candidates]
 
 
+def _build_identity_trace(session: dict) -> dict:
+    """Build an identity trace dict from session (debug only, never to customer)."""
+    return {
+        "session_id": session.get("session_id", ""),
+        "phone": session.get("phone", ""),
+        "subject_type": session.get("subject_type", ""),
+        "resolved_user_id": session.get("user_id", ""),
+        "resolved_wallet_id": session.get("wallet_id", ""),
+        "resolved_merchant_id": session.get("merchant_id", ""),
+        "source_table": "mock_sessions" if session.get("session_id", "").startswith("demo_") else "sessions",
+        "identity_found": bool(session.get("user_id") or session.get("merchant_id")),
+    }
+
+
+def discover_account_issues(
+    session: dict,
+    workflow: str,
+) -> AccountDiscoveryResult:
+    """Generic account-data discovery — reusable across all workflows.
+
+    Resolves identity from session, scans the account's data for the given
+    workflow, and returns a structured result. Distinguishes 'scan found
+    nothing' from 'scan failed'.
+
+    Args:
+        session: Server-side session dict (user_id, merchant_id, etc.).
+        workflow: Workflow to scan for (e.g. 'wallet_topup').
+
+    Returns:
+        AccountDiscoveryResult with structured discovery outcome.
+    """
+    subject_type = session.get("subject_type", "")
+    wf = (workflow or "").lower()
+
+    if subject_type == "wallet_user":
+        user_id = session.get("user_id", "")
+        if not user_id:
+            return AccountDiscoveryResult(
+                reason="identity_not_resolved",
+                data_checked=[],
+            )
+        problematic, scan_ok = _find_problematic_user_transactions(
+            user_id, wf,
+        )
+        if not scan_ok:
+            return AccountDiscoveryResult(
+                scan_error=True,
+                reason="scan_failed_repo_error",
+                data_checked=["transactions"],
+            )
+        # Also get ALL user transactions for this workflow to detect account_data_found
+        all_wf_txns = _count_user_workflow_transactions(user_id, wf)
+        return AccountDiscoveryResult(
+            account_data_found=all_wf_txns > 0,
+            issue_found=len(problematic) > 0,
+            candidate_issues=[
+                {
+                    "entity_id": getattr(t, "transaction_id", ""),
+                    "status": str(getattr(t, "status", "")),
+                    "amount": getattr(t, "amount", None),
+                }
+                for t in problematic
+            ],
+            problematic_records=problematic,
+            data_checked=["transactions", "reconciliation"],
+            reason=(
+                f"found_{len(problematic)}_problematic"
+                if problematic
+                else ("no_issues_on_account" if all_wf_txns > 0 else "no_workflow_data")
+            ),
+        )
+
+    if subject_type == "merchant":
+        merchant_id = session.get("merchant_id", "")
+        if not merchant_id:
+            return AccountDiscoveryResult(
+                reason="identity_not_resolved",
+                data_checked=[],
+            )
+        evidence = _lookup_merchant_settlement(merchant_id, None)
+        return AccountDiscoveryResult(
+            account_data_found=bool(evidence),
+            issue_found=bool(evidence),
+            data_checked=["merchant_settlement", "merchant_payout", "merchant_bank_account"],
+            reason="merchant_data_found" if evidence else "no_merchant_data",
+        )
+
+    return AccountDiscoveryResult(
+        reason=f"unsupported_subject_type_{subject_type}",
+    )
+
+
+def _count_user_workflow_transactions(user_id: str, workflow_hint: str) -> int:
+    """Count how many transactions exist for this user + workflow (any status)."""
+    try:
+        from fintech_agent.database.repository_factory import get_transaction_repo
+        repo = get_transaction_repo()
+    except Exception:
+        return 0
+    services = _get_service_types(workflow_hint)
+    try:
+        all_txns = _all_user_transactions(repo, user_id)
+        if not services:
+            return len(all_txns)
+        return sum(
+            1 for t in all_txns
+            if str(getattr(t, "service_type", "") or "").lower() in services
+        )
+    except Exception:
+        return 0
+
+
 def _resolve_wallet_user(
     session: dict,
     extracted: ExtractedFields,
@@ -246,10 +393,13 @@ def _resolve_wallet_user(
 ) -> ResolutionResult:
     """Resolve evidence for wallet_user session."""
     user_id = session.get("user_id", "")
+    trace = _build_identity_trace(session)
+
     if not user_id:
         return ResolutionResult(
             resolution_status="invalid_session",
             public_response="Không xác định được tài khoản. Vui lòng đăng nhập lại.",
+            identity_trace=trace,
         )
 
     # Check if any searchable fields are provided
@@ -265,16 +415,48 @@ def _resolve_wallet_user(
         # The customer is authenticated on their OWN account, so we don't need
         # them to provide anything: proactively scan their account for the
         # transaction that needs attention and diagnose it directly.
-        problematic = _find_problematic_user_transactions(user_id, workflow_hint)
+        discovery = discover_account_issues(session, workflow_hint)
+        discovery_dict = {
+            "account_data_found": discovery.account_data_found,
+            "issue_found": discovery.issue_found,
+            "candidate_count": len(discovery.candidate_issues),
+            "data_checked": discovery.data_checked,
+            "reason": discovery.reason,
+            "scan_error": discovery.scan_error,
+        }
+
+        # ── NO-MATCH GUARDRAIL: scan failed → evidence_error, not no_match ──
+        if discovery.scan_error:
+            logger.warning(
+                "[Resolver] Account scan failed for user=%s workflow=%s — "
+                "returning evidence_error instead of no_match",
+                user_id, workflow_hint,
+            )
+            return ResolutionResult(
+                resolution_status="evidence_error",
+                resolved_entity_type="none",
+                public_response=(
+                    "Hệ thống tạm thời chưa tra cứu được dữ liệu tài khoản. "
+                    "Bạn vui lòng thử lại sau ít phút."
+                ),
+                identity_trace=trace,
+                discovery_result=discovery_dict,
+            )
+
+        problematic = discovery.problematic_records
         if len(problematic) == 1:
-            return _resolved_from_txn(problematic[0], user_id, workflow_hint)
+            result = _resolved_from_txn(problematic[0], user_id, workflow_hint)
+            result.identity_trace = trace
+            result.discovery_result = discovery_dict
+            return result
         if len(problematic) > 1:
-            # Several records need attention → ask for ONE narrowing field.
             return ResolutionResult(
                 resolution_status="multiple_candidates",
                 resolved_entity_type="transaction",
                 public_response=multiple_candidates_message(workflow_hint, len(problematic)),
                 missing_info=["transaction_time"],
+                identity_trace=trace,
+                discovery_result=discovery_dict,
             )
         wf = (workflow_hint or "").lower()
         if wf and wf != "unknown":
@@ -286,16 +468,22 @@ def _resolve_wallet_user(
                 resolved_entity_type="none",
                 public_response=no_match_message(workflow_hint),
                 missing_info=_infer_missing_info(workflow_hint),
+                identity_trace=trace,
+                discovery_result=discovery_dict,
             )
         # Workflow still unknown → ask one gentle clarifier (what's the issue).
         return ResolutionResult(
             resolution_status="need_more_info",
             resolved_entity_type="none",
             missing_info=_infer_missing_info(workflow_hint),
+            identity_trace=trace,
+            discovery_result=discovery_dict,
         )
 
     if len(matches) == 1:
-        return _resolved_from_txn(matches[0], user_id, workflow_hint)
+        result = _resolved_from_txn(matches[0], user_id, workflow_hint)
+        result.identity_trace = trace
+        return result
 
     if len(matches) > 1:
         return ResolutionResult(
@@ -307,6 +495,7 @@ def _resolve_wallet_user(
                 f"mã tham chiếu ngân hàng để chúng tôi xác định đúng giao dịch?"
             ),
             missing_info=["transaction_time", "bank_reference"],
+            identity_trace=trace,
         )
 
     # No match — suggest more specific info (bank ref, exact date)
@@ -340,9 +529,10 @@ def _resolve_wallet_user(
     # record + the unmatched claim instead of hiding the evidence. The claim
     # is NEVER merged into the verified fields.
     if not gave_id and extracted.amount:
-        problematic = _find_problematic_user_transactions(user_id, workflow_hint)
-        if len(problematic) == 1:
+        problematic, _scan_ok = _find_problematic_user_transactions(user_id, workflow_hint)
+        if _scan_ok and len(problematic) == 1:
             base = _resolved_from_txn(problematic[0], user_id, workflow_hint)
+            base.identity_trace = trace
             try:
                 claimed = int(extracted.amount)
             except (TypeError, ValueError):
@@ -361,6 +551,7 @@ def _resolve_wallet_user(
         resolved_entity_type="none",
         public_response=NO_MATCH_ID_RESPONSE if gave_id else no_match_message(workflow_hint),
         missing_info=remaining_missing,
+        identity_trace=trace,
     )
 
 
@@ -427,7 +618,7 @@ def _transaction_needs_attention(txn: Any) -> bool:
 def _find_problematic_user_transactions(
     user_id: str,
     workflow_hint: str,
-) -> list[Any]:
+) -> tuple[list[Any], bool]:
     """Scan the logged-in user's own transactions for ones needing attention.
 
     Generic + data-driven: filters by the workflow's service types (when known)
@@ -435,13 +626,18 @@ def _find_problematic_user_transactions(
     paid-but-undelivered cases (ticket not issued / provider not confirmed).
     Most recent first. This is what lets the bot diagnose without interrogating
     the customer.
+
+    Returns:
+        Tuple of (found_transactions, scan_completed). When scan_completed is
+        False, the caller must NOT treat empty results as 'no issues' — the
+        scan failed and the true state is unknown.
     """
     try:
         from fintech_agent.database.repository_factory import get_transaction_repo
         repo = get_transaction_repo()
     except Exception as exc:
         logger.error("[Resolver] Failed to get transaction repo: %s", exc)
-        return []
+        return [], False
 
     services = _get_service_types(workflow_hint)
     found: list[Any] = []
@@ -454,14 +650,14 @@ def _find_problematic_user_transactions(
                 found.append(txn)
     except Exception as exc:
         logger.error("[Resolver] Account scan failed for %s: %s", user_id, exc)
-        return []
+        return [], False
 
     found.sort(key=lambda t: str(getattr(t, "created_at", "") or ""), reverse=True)
     logger.info(
         "[Resolver] Proactive scan user=%s workflow=%s → %d transaction(s) need attention",
         user_id, workflow_hint or "(any)", len(found),
     )
-    return found
+    return found, True
 
 
 def _resolved_from_txn(

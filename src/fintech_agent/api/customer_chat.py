@@ -145,13 +145,17 @@ from fintech_agent.safety.evidence_mapper import to_public_safe_evidence
 from fintech_agent.llm.response_composer import (
     compose_customer_response,
     compose_contextual_questions,
+    compose_from_verification,
 )
 from fintech_agent.safety.output_guardrail import (
     check_evidence_grounding,
     check_response_safety,
     sanitize_customer_text,
+    validate_verification_response,
 )
 from fintech_agent.safety.redaction import redact_sensitive
+from fintech_agent.api.account_verifier import verify_account_issue
+from fintech_agent.api.case_transition import decide_case_transition
 from fintech_agent.api.chat_handoff import finalize_customer_chat_and_handoff, get_ticket_store
 from datetime import datetime, timezone
 
@@ -835,13 +839,39 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
     # (re)asserting an amount vs. merely following up.
     _turn_claimed_amount = analysis.extracted.amount
 
-    # ── Step 3a2: Workflow switch — customer raised a DIFFERENT service ──
-    # Start a fresh logical case for the new workflow so no diagnosis, evidence,
-    # claims, or wording from the previous workflow leaks into the new answer.
-    if _is_workflow_switch(ctx, analysis):
+    # ── Step 3a1: Generic case-transition decision ──
+    # Decide whether the latest message continues the active case, switches
+    # workflow, or starts a NEW issue. A finished / no-issue case must never
+    # block the next complaint, and a different workflow must not reuse the old
+    # diagnosis or its no-match insistence streak.
+    _transition = decide_case_transition(
+        latest_router_result={
+            "message_type": analysis.message_type,
+            "workflow_hint": analysis.workflow_hint,
+        },
+        active_case={
+            "workflow": ctx.selected_workflow,
+            "status": getattr(ctx, "_last_resolution_status", ""),
+            "case_id": ctx.case_id,
+        },
+    )
+    # A NEW issue (different complaint, or a complaint after the active case was
+    # finished/found no issue) must be verified on its own merits — never reuse
+    # the previous issue's workflow, diagnosis, evidence, claims, resolved id, or
+    # its no-match insistence streak. Start a fresh logical case (keeps the
+    # conversation + identity). This also covers the workflow-switch case.
+    _is_new_issue = (
+        _transition.transition in ("new_case", "workflow_switch")
+        and not _transition.reuse_old_diagnosis
+        # only reset when there is actually prior case-specific state to drop
+        and (ctx.selected_workflow or ctx.case_id or ctx.extracted_info
+             or getattr(ctx, "_no_match_count", 0) or ctx.last_diagnosis)
+    )
+    if _is_new_issue or _is_workflow_switch(ctx, analysis):
         logger.info(
-            "[CustomerChat] Workflow switch %s → %s — fresh case, no cross-workflow reuse",
-            ctx.selected_workflow, analysis.workflow_hint,
+            "[CustomerChat] New issue (transition=%s, %s) — fresh case, "
+            "no cross-issue reuse",
+            _transition.transition, _transition.reason,
         )
         ctx = _start_fresh_case_for_switch(ctx, req.message)
         case_context = {
@@ -1076,13 +1106,41 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
 
     # ── Step 6: Generic resolver ──
     resolution = resolve_case_evidence(session, case_context, analysis)
+    # Remember this turn's outcome so next turn's transition decision knows
+    # whether the active case is finished / found no issue.
+    ctx._last_resolution_status = resolution.resolution_status
 
-    # If resolver resolved, persist into context
+    # ── Step 6a: Build verification result (generic contract) ──
+    # Workflow priority: the latest message's intent, then the active case.
+    # "unknown" is treated as no signal so we fall back to the active workflow
+    # (an uncertain analyzer must not strand verification on workflow_id=unknown).
+    _vr_workflow = (
+        (analysis.workflow_hint if analysis.workflow_hint != "unknown" else "")
+        or ctx.selected_workflow
+        or ""
+    )
+    _vr_claims = getattr(ctx, "_customer_claims", None) or CustomerClaims()
+    _verification = verify_account_issue(
+        session_identity=session,
+        workflow_id=_vr_workflow,
+        customer_claims=_vr_claims,
+        conversation_context={
+            "analysis": analysis,
+            "active_case_context": case_context,
+        },
+    )
+    # Store on context for downstream guardrail use
+    ctx._verification = _verification
+
+    # If resolver resolved, persist into context. Only treat the resolved id as
+    # a transaction_id when the entity actually IS a transaction — an account /
+    # merchant entity id must NOT pollute extracted_info as a fake transaction.
     if resolution.resolved_entity_id and req.session_id:
         ctx.resolved_entity_id = resolution.resolved_entity_id
-        ctx.extracted_info["transaction_id"] = resolution.resolved_entity_id
-        if "transaction_id" in ctx.missing_fields:
-            ctx.missing_fields.remove("transaction_id")
+        if resolution.resolved_entity_type == "transaction":
+            ctx.extracted_info["transaction_id"] = resolution.resolved_entity_id
+            if "transaction_id" in ctx.missing_fields:
+                ctx.missing_fields.remove("transaction_id")
 
     # Subtract already-provided fields from resolver's missing_info
     resolution.missing_info = _subtract_provided_fields(
@@ -1221,11 +1279,22 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
         _ex.approximate_time_text, _ex.approximate_date_text,
     ])
     prior_no_match = getattr(ctx, "_no_match_count", 0)
-    is_no_match = resolution.resolution_status == "no_match"
-    # Insistence: customer reasserts after a prior 'not found' but brings no new
-    # searchable evidence and the system still cannot verify anything.
+    # Only declare an honest no_match when we KNOW which workflow was checked.
+    # If the workflow is still unknown (uncertain analyzer, no active case), defer
+    # to the graph (Step 7) which classifies the message and may resolve it — so
+    # a new complaint is never prematurely answered as "not found".
+    _workflow_known = bool(
+        (analysis.workflow_hint and analysis.workflow_hint != "unknown")
+        or ctx.selected_workflow
+    )
+    is_no_match = resolution.resolution_status == "no_match" and _workflow_known
+    # Insistence: customer reasserts the SAME unresolved issue with no new
+    # searchable evidence. A brand-new complaint is never insistence on a prior
+    # one, even when the system still cannot verify it.
     is_insist = (
         prior_no_match >= 1
+        and analysis.message_type != "new_complaint"
+        and _workflow_known
         and not _has_searchable
         and not resolution.resolved_entity_id
         and resolution.resolution_status in ("no_match", "need_more_info")
@@ -1361,15 +1430,27 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
             workflow = analyzer_wf
         else:
             workflow = graph_wf
-        # Re-run the resolver if the workflow changed from what was initially set.
-        if (
-            workflow
-            and workflow != analysis.workflow_hint
-            and resolution.resolution_status != "resolved"
-        ):
+        # Re-resolve + re-verify whenever the FINAL routed workflow differs from
+        # the workflow the resolution/verification was computed for. This is
+        # UNCONDITIONAL (not gated on "not resolved"): when the analyzer returned
+        # "unknown", the first resolver pass may have matched data from a
+        # DIFFERENT workflow on the same account (e.g. a train txn for a wallet
+        # complaint). We must re-check only the selected workflow's data so the
+        # answer never comes from another workflow's records.
+        if workflow and workflow != (analysis.workflow_hint or ""):
             analysis.workflow_hint = workflow
             resolution = resolve_case_evidence(session, case_context, analysis)
             raw_evidence = resolution.public_safe_evidence or {}
+            # Re-verify for the FINAL workflow so verification.workflow_id is
+            # consistent and only this workflow's data is treated as evidence.
+            ctx._verification = verify_account_issue(
+                session_identity=session,
+                workflow_id=workflow,
+                customer_claims=getattr(ctx, "_customer_claims", None) or CustomerClaims(),
+                conversation_context={
+                    "analysis": analysis, "active_case_context": case_context,
+                },
+            )
 
     public_evidence = to_public_safe_evidence(
         raw_evidence=raw_evidence,
@@ -1448,14 +1529,38 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
             and bool(public_evidence.get("customer_safe_cause"))
         )
 
+        # If the selected workflow has NO matching record on the logged-in
+        # account (e.g. a wallet complaint on an account that only has train
+        # data), answer honestly with that workflow's no-match message — never
+        # the generic template, and never another workflow's wording.
+        _new_complaint_no_match = resolution.resolution_status == "no_match"
+
         customer_status = _map_to_customer_status(internal_status)
-        if proactively_resolved:
+        if _new_complaint_no_match:
+            safe_questions = []
+            customer_status = "need_more_info"
+        elif proactively_resolved:
             safe_questions = []           # nothing to ask — we already found it
             customer_status = "processing"
         elif safe_questions and customer_status != "need_more_info":
             customer_status = "need_more_info"
 
-        if proactively_resolved:
+        if _new_complaint_no_match:
+            final_response = resolution.public_response or no_match_message(workflow)
+            guardrail = check_response_safety(
+                final_response, policy, workflow=workflow, diagnosis=public_evidence,
+            )
+        elif proactively_resolved:
+            # Build claims/evidence summaries for source-labeling
+            _p_claims = None
+            _p_evidence = None
+            _p_claims_obj = getattr(ctx, "_customer_claims", None)
+            if _p_claims_obj and hasattr(_p_claims_obj, "latest"):
+                _p_claims = dict(_p_claims_obj.latest)
+            _p_evidence_obj = getattr(ctx, "_verified_evidence", None)
+            if _p_evidence_obj and hasattr(_p_evidence_obj, "to_summary"):
+                _p_evidence = {"fields": _p_evidence_obj.to_summary()}
+
             composed = compose_customer_response(
                 customer_message=req.message,
                 message_analysis=analysis,
@@ -1463,6 +1568,8 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
                 public_safe_evidence=public_evidence,
                 resolution_status=resolution.resolution_status,
                 contradictions=getattr(ctx, "_contradictions", None),
+                customer_claims=_p_claims,
+                verified_evidence=_p_evidence,
             )
             guardrail = check_response_safety(
                 composed.public_message, policy,
@@ -1511,6 +1618,29 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
         final_response = sanitize_customer_text(final_response)
         final_response = _apply_evidence_grounding(final_response, resolution, ctx, workflow)
         safe_questions = [sanitize_customer_text(q) for q in safe_questions]
+
+        # ── Verification-aware guardrail ──
+        # Runs the 6-rule validation against the generic verification contract.
+        _prev_wf = getattr(ctx, "_previous_workflow", None)
+        _prev_diag = getattr(ctx, "_previous_diagnosis", None)
+        _vr = getattr(ctx, "_verification", None)
+        if _vr:
+            vr_guardrail = validate_verification_response(
+                final_response,
+                verification_result=_vr,
+                selected_workflow=workflow,
+                previous_workflow=_prev_wf,
+                previous_diagnosis=_prev_diag,
+                policy=policy,
+            )
+            if not vr_guardrail.is_safe:
+                logger.warning(
+                    "[CustomerChat] Verification guardrail blocked (%d violations): %s",
+                    len(vr_guardrail.violations), vr_guardrail.violations[:3],
+                )
+                # Only use fallback if existing guardrails didn't already fix it
+                if vr_guardrail.sanitized_text:
+                    final_response = vr_guardrail.sanitized_text
 
         logger.info(
             "[CustomerChat] New case %s. status=%s, questions=%d",
@@ -1607,7 +1737,9 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
         and ctx.last_diagnosis
         and resolution.resolution_status != "resolved"
         and not _claim_conflicts_binding
-        and (_diag_wf == _current_wf or not _current_wf or _current_wf == "unknown")
+        and _diag_wf == _current_wf
+        and _current_wf
+        and _current_wf != "unknown"
     ):
         public_evidence = dict(ctx.last_diagnosis)
         workflow = public_evidence.get("workflow") or workflow
@@ -1616,16 +1748,31 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
         state is None
         and ctx.last_diagnosis
         and resolution.resolution_status != "resolved"
-        and (_diag_wf != _current_wf or _claim_conflicts_binding)
+        and (
+            _diag_wf != _current_wf
+            or _claim_conflicts_binding
+            or not _current_wf
+            or _current_wf == "unknown"
+        )
     ):
-        # Stale diagnosis (different workflow, or claim now conflicts with the
-        # bound verified amount) — discard and let the resolver's fresh result
-        # (even if thin) drive the response.
+        # Stale diagnosis (different workflow, unknown workflow, or claim now
+        # conflicts with the bound verified amount) — discard and let the
+        # resolver's fresh result (even if thin) drive the response.
         logger.info(
             "[CustomerChat] Discarding stale last_diagnosis: "
             "diag_wf=%s, current_wf=%s, claim_conflicts_binding=%s",
             _diag_wf, _current_wf, _claim_conflicts_binding,
         )
+
+    # Build claims/evidence summaries for source-labeling in the composer
+    _claims_summary = None
+    _evidence_summary = None
+    _customer_claims_obj = getattr(ctx, "_customer_claims", None)
+    if _customer_claims_obj and hasattr(_customer_claims_obj, "latest"):
+        _claims_summary = dict(_customer_claims_obj.latest)
+    _verified_evidence_obj = getattr(ctx, "_verified_evidence", None)
+    if _verified_evidence_obj and hasattr(_verified_evidence_obj, "to_summary"):
+        _evidence_summary = {"fields": _verified_evidence_obj.to_summary()}
 
     # For follow-ups and resolver-handled cases
     composed = compose_customer_response(
@@ -1636,6 +1783,8 @@ async def customer_chat(req: CustomerChatRequest) -> CustomerChatResponse:
         resolution_status=resolution.resolution_status,
         contradictions=getattr(ctx, '_contradictions', None),
         recheck_context=recheck_context,
+        customer_claims=_claims_summary,
+        verified_evidence=_evidence_summary,
     )
 
     # ── Step 10: Output guardrail (workflow-aware) ──

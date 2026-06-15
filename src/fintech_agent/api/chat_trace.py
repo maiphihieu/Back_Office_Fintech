@@ -143,6 +143,9 @@ class CustomerChatTrace:
     final_status: str = ""
     final_response_length: int = 0
     questions_count: int = 0
+    # ── Identity & discovery trace (from resolver) ──
+    account_identity_trace: dict | None = None
+    account_discovery: dict | None = None
 
     def populate_analysis(self, analysis: Any) -> None:
         """Populate trace from MessageAnalysis object."""
@@ -200,6 +203,14 @@ class CustomerChatTrace:
         self.evidence.has_bank_status = "bank_status" in evidence
         self.evidence.has_wallet_status = "wallet_status" in evidence
         self.evidence.has_reconciliation = "reconciliation_status" in evidence
+
+        # Identity & discovery trace (debug only)
+        self.account_identity_trace = getattr(
+            resolution, "identity_trace", None,
+        )
+        self.account_discovery = getattr(
+            resolution, "discovery_result", None,
+        )
 
     def populate_diagnosis(self, public_evidence: dict) -> None:
         """Populate trace from public-safe evidence/diagnosis dict."""
