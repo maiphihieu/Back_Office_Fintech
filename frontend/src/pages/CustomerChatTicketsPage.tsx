@@ -51,26 +51,8 @@ const RISK_TONES: Record<string, string> = {
 };
 
 function Badge({ text, tone }: { text: string; tone: string }) {
-  const tones: Record<string, React.CSSProperties> = {
-    chat: { background: '#e0f2fe', color: '#075985' },
-    merchant: { background: '#fef3c7', color: '#92400e' },
-    wallet: { background: '#dcfce7', color: '#166534' },
-    approval: { background: '#fee2e2', color: '#991b1b' },
-    staff: { background: '#ede9fe', color: '#5b21b6' },
-    muted: { background: '#f1f5f9', color: '#475569' },
-  };
   return (
-    <span
-      style={{
-        ...(tones[tone] || tones.muted),
-        padding: '2px 8px',
-        borderRadius: 999,
-        fontSize: '0.72rem',
-        fontWeight: 600,
-        whiteSpace: 'nowrap',
-        marginRight: 4,
-      }}
-    >
+    <span className={`ct-badge ct-badge-${tone}`}>
       {text}
     </span>
   );
@@ -112,19 +94,11 @@ export default function CustomerChatTicketsPage() {
     }
   }, [filters, search]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- data fetch on filter/search change
+  useEffect(() => { void load(); }, [load]);
 
   const setFilter = (key: keyof ChatTicketFilters, value: string) =>
     setFilters((f) => ({ ...f, [key]: value === '' ? undefined : value }));
-
-  const inputStyle: React.CSSProperties = {
-    padding: '6px 8px',
-    borderRadius: 6,
-    border: '1px solid #cbd5e1',
-    fontSize: '0.85rem',
-  };
 
   const headers = useMemo(
     () => [
@@ -135,122 +109,121 @@ export default function CustomerChatTicketsPage() {
   );
 
   return (
-    <div style={{ padding: '20px 24px' }}>
-      <h1 style={{ fontSize: '1.4rem', marginBottom: 4 }}>Customer Chat Tickets</h1>
-      <p style={{ color: '#64748b', marginBottom: 16, fontSize: '0.9rem' }}>
-        Ticket từ chat khách hàng. Tổng: {total}.
-      </p>
+    <div className="ct-page">
+      <div className="ct-header">
+        <div className="ct-title-wrap">
+          <h1>Customer Chat Tickets</h1>
+          <p className="ct-subtitle">Ticket từ chat khách hàng.</p>
+        </div>
+        <span className="ct-total-pill">Tổng: {total}</span>
+      </div>
 
       {/* Filters */}
-      <div
-        style={{
-          display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16,
-          alignItems: 'center',
-        }}
-      >
-        <select style={inputStyle} value={filters.source ?? 'customer_chat'}
+      <div className="filters-bar ct-filters">
+        <select className="form-select" value={filters.source ?? 'customer_chat'}
           onChange={(e) => setFilter('source', e.target.value)}>
           <option value="customer_chat">Source: Customer Chat</option>
           <option value="staff">Source: Staff Created</option>
           <option value="all">Source: All</option>
         </select>
-        <select style={inputStyle} value={filters.subject_type ?? ''}
+        <select className="form-select" value={filters.subject_type ?? ''}
           onChange={(e) => setFilter('subject_type', e.target.value)}>
           <option value="">Loại: Tất cả</option>
           <option value="wallet_user">Wallet User</option>
           <option value="merchant">Merchant</option>
         </select>
-        <select style={inputStyle} value={filters.workflow ?? ''}
+        <select className="form-select" value={filters.workflow ?? ''}
           onChange={(e) => setFilter('workflow', e.target.value)}>
           <option value="">Workflow: Tất cả</option>
           {WORKFLOWS.map((w) => <option key={w} value={w}>{WORKFLOW_LABELS[w] || w}</option>)}
         </select>
-        <select style={inputStyle} value={filters.status ?? ''}
+        <select className="form-select" value={filters.status ?? ''}
           onChange={(e) => setFilter('status', e.target.value)}>
           <option value="">Trạng thái: Tất cả</option>
           {STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]?.text || s}</option>)}
         </select>
-        <select style={inputStyle} value={filters.risk_level ?? ''}
+        <select className="form-select" value={filters.risk_level ?? ''}
           onChange={(e) => setFilter('risk_level', e.target.value)}>
           <option value="">Rủi ro: Tất cả</option>
           {RISKS.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
-        <select style={inputStyle}
+        <select className="form-select"
           value={filters.approval_required === undefined ? '' : String(filters.approval_required)}
           onChange={(e) => setFilter('approval_required', e.target.value)}>
           <option value="">Phê duyệt: Tất cả</option>
           <option value="true">Cần phê duyệt</option>
           <option value="false">Không cần</option>
         </select>
-        <input style={{ ...inputStyle, minWidth: 220 }}
+        <input className="form-input ct-search"
           placeholder="Tìm SĐT / email / user_id / merchant_id / mã GD"
           value={search} onChange={(e) => setSearch(e.target.value)} />
-        <button style={{ ...inputStyle, cursor: 'pointer', background: '#0ea5e9', color: '#fff', border: 'none' }}
-          onClick={load}>Lọc</button>
+        <button className="btn btn-primary" onClick={load}>Lọc</button>
       </div>
 
-      {error && <div style={{ color: '#b91c1c', marginBottom: 12 }}>{error}</div>}
-      {loading && <div style={{ color: '#64748b' }}>Đang tải…</div>}
+      {error && <div className="alert alert-danger ct-error">{error}</div>}
+      {loading && <div className="loading"><div className="spinner" /></div>}
 
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.83rem' }}>
-          <thead>
-            <tr style={{ background: '#f8fafc', textAlign: 'left' }}>
-              {headers.map((h) => (
-                <th key={h} style={{ padding: '8px 10px', borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((t) => {
-              const st = STATUS_LABELS[t.backoffice_ticket_status] || { text: t.backoffice_ticket_status, tone: 'muted' };
-              const riskTone = RISK_TONES[t.risk_level] || 'muted';
-              return (
-                <tr key={t.ticket_id}
-                  style={{ borderBottom: '1px solid #eef2f7', cursor: 'pointer' }}
-                  onClick={() => navigate(`/chat-tickets/${t.ticket_id}`)}>
-                  <td style={{ padding: '8px 10px', fontFamily: 'monospace', fontSize: '0.78rem' }}>{t.ticket_id}</td>
-                  <td style={{ padding: '8px 10px' }}>
-                    <div>{t.complainant_display_name || '—'}</div>
-                    {t.complainant_phone && (
-                      <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>{t.complainant_phone}</span>
-                    )}
-                  </td>
-                  <td style={{ padding: '8px 10px' }}>
-                    {t.subject_type === 'merchant'
-                      ? <Badge text="Merchant" tone="merchant" />
-                      : t.subject_type === 'wallet_user'
-                        ? <Badge text="Wallet" tone="wallet" />
-                        : <Badge text={t.subject_type || '—'} tone="muted" />}
-                  </td>
-                  <td style={{ padding: '8px 10px' }}>
-                    <Badge text={WORKFLOW_LABELS[t.selected_workflow] || t.selected_workflow || '—'} tone="chat" />
-                  </td>
-                  <td style={{ padding: '8px 10px', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {t.recommended_action || '—'}
-                  </td>
-                  <td style={{ padding: '8px 10px' }}>
-                    <Badge text={t.risk_level} tone={riskTone} />
-                  </td>
-                  <td style={{ padding: '8px 10px' }}>
-                    {t.approval_required && <Badge text="Cần duyệt" tone="approval" />}
-                    <Badge text={st.text} tone={st.tone} />
-                  </td>
-                  <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', color: '#64748b', fontSize: '0.78rem' }}>
-                    {relativeTime(t.updated_at)}
-                  </td>
-                </tr>
-              );
-            })}
-            {!loading && rows.length === 0 && (
-              <tr><td colSpan={headers.length} style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>
-                Chưa có ticket nào.
-              </td></tr>
-            )}
-          </tbody>
-        </table>
+      <div className="card ct-table-card">
+        <div className="table-container">
+          <table className="table ct-table">
+            <thead>
+              <tr>
+                {headers.map((h) => (
+                  <th key={h}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((t) => {
+                const st = STATUS_LABELS[t.backoffice_ticket_status] || { text: t.backoffice_ticket_status, tone: 'muted' };
+                const riskTone = RISK_TONES[t.risk_level] || 'muted';
+                return (
+                  <tr key={t.ticket_id}
+                    onClick={() => navigate(`/chat-tickets/${t.ticket_id}`)}>
+                    <td><span className="ct-ticket-id">{t.ticket_id}</span></td>
+                    <td>
+                      <div className="ct-person">
+                        <div>{t.complainant_display_name || '—'}</div>
+                        {t.complainant_phone && (
+                          <span className="ct-phone">{t.complainant_phone}</span>
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      {t.subject_type === 'merchant'
+                        ? <Badge text="Merchant" tone="merchant" />
+                        : t.subject_type === 'wallet_user'
+                          ? <Badge text="Wallet" tone="wallet" />
+                          : <Badge text={t.subject_type || '—'} tone="muted" />}
+                    </td>
+                    <td>
+                      <Badge text={WORKFLOW_LABELS[t.selected_workflow] || t.selected_workflow || '—'} tone="chat" />
+                    </td>
+                    <td className="ct-action-cell">
+                      {t.recommended_action || '—'}
+                    </td>
+                    <td>
+                      <Badge text={t.risk_level} tone={riskTone} />
+                    </td>
+                    <td>
+                      {t.approval_required && <Badge text="Cần duyệt" tone="approval" />}
+                      <Badge text={st.text} tone={st.tone} />
+                    </td>
+                    <td className="ct-updated">
+                      {relativeTime(t.updated_at)}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!loading && rows.length === 0 && (
+                <tr><td colSpan={headers.length} className="ct-empty-cell">
+                  Chưa có ticket nào.
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
 }
-

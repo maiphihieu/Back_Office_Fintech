@@ -14,14 +14,14 @@
   height: 56px;
   border-radius: 50%;
   border: none;
-  background: linear-gradient(135deg, #2563EB 0%, #0EA5E9 100%);
+  background: linear-gradient(135deg, #0B477B 0%, #0D5D9D 100%);
   color: #ffffff;
   font-size: 0.78rem;
   font-weight: 700;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   cursor: pointer;
   box-shadow:
-    0 4px 14px rgba(37, 99, 235, 0.35),
+    0 8px 18px rgba(13, 78, 135, 0.30),
     0 2px 6px rgba(0, 0, 0, 0.1);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
   display: flex;
@@ -34,7 +34,7 @@
 .ccw-fab:hover {
   transform: scale(1.08);
   box-shadow:
-    0 6px 20px rgba(37, 99, 235, 0.45),
+    0 12px 24px rgba(13, 78, 135, 0.36),
     0 3px 8px rgba(0, 0, 0, 0.12);
 }
 
@@ -57,9 +57,10 @@
   max-height: 70vh;
   background: #ffffff;
   border-radius: 20px;
+  border: 1px solid #EADDD7;
   box-shadow:
-    0 12px 40px rgba(15, 23, 42, 0.12),
-    0 4px 12px rgba(15, 23, 42, 0.06);
+    0 18px 46px rgba(55, 44, 38, 0.12),
+    0 4px 12px rgba(55, 44, 38, 0.06);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -80,7 +81,7 @@
 
 /* ─── Header ─── */
 .ccw-header {
-  background: linear-gradient(135deg, #2563EB 0%, #0EA5E9 100%);
+  background: linear-gradient(135deg, #0B477B 0%, #0D5D9D 100%);
   color: #ffffff;
   padding: 16px 20px;
   display: flex;
@@ -130,10 +131,10 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  background: #F8FAFC;
+  background: #FFF8F4;
   min-height: 200px;
   scrollbar-width: thin;
-  scrollbar-color: #CBD5E1 transparent;
+  scrollbar-color: #EADDD7 transparent;
 }
 
 .ccw-messages::-webkit-scrollbar {
@@ -141,7 +142,7 @@
 }
 
 .ccw-messages::-webkit-scrollbar-thumb {
-  background: #CBD5E1;
+  background: #EADDD7;
   border-radius: 4px;
 }
 
@@ -193,15 +194,15 @@
 /* Bot message — left, white bubble */
 .ccw-bubble--bot {
   background: #ffffff;
-  color: #1E293B;
-  border: 1px solid #E2E8F0;
+  color: #0A315D;
+  border: 1px solid #EADDD7;
   border-bottom-left-radius: 4px;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
 
 /* User message — right, blue bubble */
 .ccw-bubble--user {
-  background: linear-gradient(135deg, #2563EB 0%, #0EA5E9 100%);
+  background: linear-gradient(135deg, #0B477B 0%, #0D5D9D 100%);
   color: #ffffff;
   border-bottom-right-radius: 4px;
 }
@@ -209,7 +210,7 @@
 /* System message — centered, muted note */
 .ccw-bubble--system {
   background: transparent;
-  color: #94A3B8;
+  color: #8F98AA;
   font-size: 0.75rem;
   font-style: italic;
   padding: 4px 12px;
@@ -220,9 +221,9 @@
 /* ─── Case ID Badge ─── */
 .ccw-case-id {
   font-size: 0.72rem;
-  color: #64748B;
-  background: #EFF6FF;
-  border: 1px solid #BFDBFE;
+  color: #526178;
+  background: #EAF2F8;
+  border: 1px solid #C7DCEB;
   padding: 4px 12px;
   border-radius: 12px;
   font-weight: 500;
@@ -234,12 +235,12 @@
 .ccw-questions {
   max-width: 80%;
   padding: 10px 14px;
-  background: #FFFBEB;
-  border: 1px solid #FDE68A;
+  background: #FFF5E7;
+  border: 1px solid #F2D6AD;
   border-radius: 16px;
   border-bottom-left-radius: 4px;
   font-size: 0.82rem;
-  color: #92400E;
+  color: #B56A1B;
   margin-top: 4px;
   animation: ccwFadeIn 0.2s ease;
 }
@@ -268,11 +269,11 @@
   gap: 8px;
   padding: 10px 14px;
   background: #ffffff;
-  border: 1px solid #E2E8F0;
+  border: 1px solid #EADDD7;
   border-radius: 16px;
   border-bottom-left-radius: 4px;
   font-size: 0.82rem;
-  color: #64748B;
+  color: #526178;
   animation: ccwFadeIn 0.2s ease;
 }
 
@@ -285,7 +286,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #94A3B8;
+  background: #8F98AA;
   animation: ccwBounce 1.4s ease-in-out infinite;
 }
 
@@ -312,7 +313,7 @@
 .ccw-input-area {
   padding: 12px 16px;
   background: #ffffff;
-  border-top: 1px solid #E2E8F0;
+  border-top: 1px solid #EADDD7;
   display: flex;
   gap: 8px;
   align-items: flex-end;
@@ -322,12 +323,12 @@
 .ccw-input {
   flex: 1;
   padding: 10px 14px;
-  border: 1.5px solid #E2E8F0;
+  border: 1.5px solid #EADDD7;
   border-radius: 12px;
   font-size: 0.84rem;
   font-family: inherit;
-  color: #1E293B;
-  background: #F8FAFC;
+  color: #0A315D;
+  background: #FFFBF8;
   resize: none;
   min-height: 40px;
   max-height: 100px;
@@ -336,13 +337,13 @@
 }
 
 .ccw-input::placeholder {
-  color: #94A3B8;
+  color: #8F98AA;
 }
 
 .ccw-input:focus {
   outline: none;
-  border-color: #2563EB;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
+  border-color: #0D4E87;
+  box-shadow: 0 0 0 4px rgba(13, 78, 135, 0.10);
   background: #ffffff;
 }
 
@@ -350,7 +351,7 @@
   padding: 10px 16px;
   border: none;
   border-radius: 12px;
-  background: linear-gradient(135deg, #2563EB 0%, #0EA5E9 100%);
+  background: linear-gradient(135deg, #0B477B 0%, #0D5D9D 100%);
   color: #ffffff;
   font-size: 0.82rem;
   font-weight: 600;
@@ -363,7 +364,7 @@
 
 .ccw-send-btn:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 3px 10px rgba(37, 99, 235, 0.3);
+  box-shadow: 0 8px 18px rgba(13, 78, 135, 0.24);
 }
 
 .ccw-send-btn:active:not(:disabled) {

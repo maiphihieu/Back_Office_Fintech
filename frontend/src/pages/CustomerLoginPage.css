@@ -5,7 +5,7 @@
 
 .cl-page {
   min-height: 100vh;
-  background: linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #0F172A 100%);
+  background: linear-gradient(135deg, #fff8f4 0%, #fffdfb 48%, #fff0ea 100%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -40,38 +40,39 @@
   width: 64px;
   height: 64px;
   border-radius: 20px;
-  background: linear-gradient(135deg, #2563EB 0%, #0EA5E9 100%);
+  background: linear-gradient(135deg, #0B477B 0%, #0D5D9D 100%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-size: 1.75rem;
   color: #fff;
   margin-bottom: 16px;
-  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.35);
+  box-shadow: 0 12px 26px rgba(13, 78, 135, 0.22);
 }
 
 .cl-title {
   font-size: 1.5rem;
   font-weight: 700;
-  color: #F1F5F9;
+  color: #0A315D;
   margin: 0 0 8px 0;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .cl-subtitle {
   font-size: 0.88rem;
-  color: #94A3B8;
+  color: #526178;
   margin: 0;
   line-height: 1.6;
 }
 
 /* ─── Form ─── */
 .cl-form {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid #EADDD7;
   border-radius: 16px;
   padding: 28px 24px;
-  backdrop-filter: blur(8px);
+  box-shadow: 0 18px 46px rgba(55, 44, 38, 0.10);
+  backdrop-filter: blur(10px);
 }
 
 .cl-field {
@@ -82,7 +83,7 @@
   display: block;
   font-size: 0.82rem;
   font-weight: 600;
-  color: #CBD5E1;
+  color: #526178;
   margin-bottom: 8px;
   letter-spacing: 0.01em;
 }
@@ -90,10 +91,10 @@
 .cl-input {
   width: 100%;
   padding: 12px 16px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid #EADDD7;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #F1F5F9;
+  background: #FFFBF8;
+  color: #0A315D;
   font-size: 0.95rem;
   font-family: inherit;
   outline: none;
@@ -102,12 +103,13 @@
 }
 
 .cl-input::placeholder {
-  color: #64748B;
+  color: #8F98AA;
 }
 
 .cl-input:focus {
-  border-color: rgba(37, 99, 235, 0.6);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+  border-color: #0D4E87;
+  box-shadow: 0 0 0 4px rgba(13, 78, 135, 0.10);
+  background: #ffffff;
 }
 
 .cl-input:disabled {
@@ -126,7 +128,7 @@
   padding: 13px 20px;
   border: none;
   border-radius: 12px;
-  background: linear-gradient(135deg, #2563EB 0%, #0EA5E9 100%);
+  background: linear-gradient(135deg, #0B477B 0%, #0D5D9D 100%);
   color: #ffffff;
   font-size: 0.95rem;
   font-weight: 600;
@@ -142,7 +144,7 @@
 
 .cl-submit-btn:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
+  box-shadow: 0 12px 24px rgba(13, 78, 135, 0.24);
 }
 
 .cl-submit-btn:active:not(:disabled) {
@@ -191,10 +193,10 @@
 .cl-error {
   text-align: center;
   padding: 12px 16px;
-  background: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  background: #FFF0F2;
+  border: 1px solid #F2C7CF;
   border-radius: 10px;
-  color: #FCA5A5;
+  color: #B8334D;
   font-size: 0.84rem;
   margin-bottom: 16px;
 }
@@ -203,21 +205,21 @@
 .cl-demo-hint {
   margin-top: 20px;
   padding: 16px;
-  background: rgba(37, 99, 235, 0.06);
-  border: 1px solid rgba(37, 99, 235, 0.15);
+  background: #FFF0EA;
+  border: 1px solid #EADDD7;
   border-radius: 12px;
   font-size: 0.8rem;
-  color: #94A3B8;
+  color: #526178;
   line-height: 1.6;
   text-align: center;
 }
 
 .cl-demo-hint code {
-  background: rgba(255, 255, 255, 0.08);
+  background: #ffffff;
   padding: 2px 6px;
   border-radius: 4px;
   font-family: 'SF Mono', 'Fira Code', monospace;
-  color: #60A5FA;
+  color: #0D4E87;
   font-size: 0.82rem;
 }
 
@@ -226,11 +228,11 @@
   text-align: center;
   margin-top: 24px;
   font-size: 0.75rem;
-  color: #475569;
+  color: #8F98AA;
 }
 
 .cl-footer a {
-  color: #60A5FA;
+  color: #0D4E87;
   text-decoration: none;
 }
 
